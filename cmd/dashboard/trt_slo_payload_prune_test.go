@@ -37,7 +37,7 @@ func TestSLOPayloadRetention(t *testing.T) {
 			wantKeys: []string{"recent", "newer", "kept-accepted"},
 		},
 		{
-			name:   "pruner keeps a row updated before delete",
+			name:   "upsert before prune keeps a row that is no longer expired",
 			recent: 2,
 			items: []types.SLOWorkspaceItem{
 				{Model: gorm.Model{ID: 1}, Team: "TRT", Kind: payloadv1.Kind, ItemKey: "was-expired", GroupKey: "nightly", Outcome: "Rejected", OccurredAt: now.Add(-72 * time.Hour)},

@@ -272,6 +272,117 @@ def test_update_outage_no_fields(tmp_path):
     assert "No fields to update" in result["error"]
 
 
+def test_get_team_slo_quotes_team_and_returns_object(api: ShipStatusAPI):
+    payload = {"team": "A B/C", "items": []}
+    with patch.object(api.client, "public_get", return_value=payload) as mock_get:
+        result = api.get_team_slo("A B/C")
+    assert result == payload
+    mock_get.assert_called_once_with("/teams/A%20B%2FC/slo")
+
+
+def test_get_team_slo_returns_api_error(api: ShipStatusAPI):
+    with patch.object(api.client, "public_get", return_value={"error": "HTTP 500: boom"}):
+        result = api.get_team_slo("TRT")
+    assert result == {"error": "HTTP 500: boom"}
+
+
+def test_get_team_slo_rejects_non_object(api: ShipStatusAPI):
+    with patch.object(api.client, "public_get", return_value=[{"team": "TRT"}]):
+        result = api.get_team_slo("TRT")
+    assert "error" in result
+
+
+def test_get_team_slo_summary(api: ShipStatusAPI):
+    payload = {"teams": [{"team": "TRT"}]}
+    with patch.object(api.client, "public_get", return_value=payload) as mock_get:
+        result = api.get_team_slo_summary()
+    assert result == payload
+    mock_get.assert_called_once_with("/teams/slo-summary")
+
+
+def test_get_team_slo_summary_failure(api: ShipStatusAPI):
+    with patch.object(api.client, "public_get", return_value=None):
+        result = api.get_team_slo_summary()
+    assert result == {"error": "Failed to retrieve SLO summary."}
+
+
+def test_get_team_slo_summary_rejects_non_object(api: ShipStatusAPI):
+    with patch.object(api.client, "public_get", return_value=["TRT"]):
+        result = api.get_team_slo_summary()
+    assert "error" in result
+
+
+def test_upsert_slo_item_puts_body_and_acting_for(api: ShipStatusAPI):
+    with patch.object(api.client, "protected_request", return_value={"id": 7}) as mock:
+        result = api.upsert_slo_item(
+            "A B/C",
+            "payload/streams",
+            1,
+            "item/key",
+            "nightly",
+            "2026-09-25T12:00:00Z",
+            "Accepted",
+            {"payload_url": "https://example.com"},
+            notes="kept",
+            acting_for="chai-bot",
+        )
+    assert result["id"] == 7
+    assert mock.call_args.args[0] == "PUT"
+    assert mock.call_args.args[1] == "/teams/A%20B%2FC/slo/items"
+    body = mock.call_args.kwargs["body"]
+    assert body["kind"] == "payload/streams"
+    assert body["schema_version"] == 1
+    assert body["item_key"] == "item/key"
+    assert body["group_key"] == "nightly"
+    assert body["occurred_at"] == "2026-09-25T12:00:00Z"
+    assert body["outcome"] == "Accepted"
+    assert body["details"] == {"payload_url": "https://example.com"}
+    assert body["notes"] == "kept"
+    assert "acting_for" not in body
+    assert mock.call_args.kwargs["acting_for"] == "chai-bot"
+
+
+def test_upsert_slo_item_returns_api_error(api: ShipStatusAPI):
+    with patch.object(api.client, "protected_request", return_value={"error": "HTTP 403: no"}):
+        result = api.upsert_slo_item(
+            "TRT", "payload_streams", 1, "k", "g", "2026-09-25T12:00:00Z", "Rejected", {}, acting_for="x"
+        )
+    assert result == {"error": "HTTP 403: no"}
+
+
+def test_upsert_slo_item_rejects_non_object(api: ShipStatusAPI):
+    with patch.object(api.client, "protected_request", return_value=[{"id": 1}]):
+        result = api.upsert_slo_item("TRT", "payload_streams", 1, "k", "g", "2026-09-25T12:00:00Z", "Rejected", {})
+    assert "error" in result
+
+
+def test_add_slo_item_link_optional_outage_and_acting_for(api: ShipStatusAPI):
+    with patch.object(api.client, "protected_request", return_value={"ID": 4}) as mock:
+        result = api.add_slo_item_link(
+            "TRT",
+            "payload/streams",
+            "a/b",
+            "https://example.com/j",
+            link_type="jira",
+            outage_id=12,
+            acting_for="chai-bot",
+        )
+    assert result["ID"] == 4
+    assert mock.call_args.args[0] == "PUT"
+    assert mock.call_args.args[1] == "/teams/TRT/slo/items/payload%2Fstreams/a%2Fb/links"
+    body = mock.call_args.kwargs["body"]
+    assert body == {"url": "https://example.com/j", "link_type": "jira", "outage_id": 12}
+    assert "acting_for" not in body
+    assert mock.call_args.kwargs["acting_for"] == "chai-bot"
+
+
+def test_add_slo_item_link_omits_outage_id(api: ShipStatusAPI):
+    with patch.object(api.client, "protected_request", return_value={"ID": 5}) as mock:
+        api.add_slo_item_link("TRT", "payload_streams", "k", "https://example.com", link_type="other")
+    assert "outage_id" not in mock.call_args.kwargs["body"]
+    assert mock.call_args.kwargs["acting_for"] == ""
+
+
 def test_delete_outage_success(tmp_path):
     api = _authed_api(tmp_path)
     with patch.object(api.client, "protected_request", return_value=None):

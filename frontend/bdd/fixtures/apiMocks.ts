@@ -11,6 +11,8 @@ import {
   mockOutages,
   mockTags,
   mockTriageNote,
+  mockTRTSummary,
+  mockTRTTeamSLO,
   mockUnhealthySubComponents,
 } from './mockData'
 
@@ -297,5 +299,16 @@ export async function setupApiMocks(page: Page, options: MockApiOptions = {}) {
       return route.fulfill({ status: 204 })
     }
     return route.fallback()
+  })
+}
+
+export async function installTRTSLOMocks(page: Page) {
+  await page.route(`${PUBLIC}/api/teams/slo-summary`, (route) => json(route, mockTRTSummary))
+  await page.route(`${PUBLIC}/api/teams/*/slo`, (route) => {
+    const team = new URL(route.request().url()).pathname.split('/').filter(Boolean).at(-2)
+    if (team === 'TRT') {
+      return json(route, mockTRTTeamSLO)
+    }
+    return json(route, { team: '', evaluations: [], slo_components: [], items: [] })
   })
 }

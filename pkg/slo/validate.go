@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"ship-status-dash/pkg/slo/payloadstreams/v1"
+	v1 "ship-status-dash/pkg/slo/payloadstreams/v1"
 	"ship-status-dash/pkg/types"
 )
 

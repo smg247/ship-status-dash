@@ -1,6 +1,7 @@
 package types
 
 import (
+	"errors"
 	"os"
 	"testing"
 
@@ -119,6 +120,26 @@ func TestValidateTeamSLOs(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+}
+
+func TestValidateTeamSLOsSpecCallback(t *testing.T) {
+	cfg := &DashboardConfig{TeamSLOs: []TeamSLOConfig{{
+		Team:   "TRT",
+		Owners: []Owner{{User: "chai-bot"}},
+		SLOs: []NamedSLO{{
+			Name:      "accepted-payload-per-day",
+			Source:    "payload_acceptance",
+			Workspace: &SLOWorkspace{Kind: "payload_streams", SchemaVersion: 1},
+		}},
+	}}}
+	err := cfg.ValidateTeamSLOs(func(kind string, version int) bool {
+		return kind == "payload_streams" && version == 1
+	}, func(*SLOWorkspace) error {
+		return errors.New("window must be a positive duration")
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `team_slos "TRT"`)
+	assert.Contains(t, err.Error(), "window must be a positive duration")
 }
 
 func TestCheckedInDashboardConfigsListSLOComponents(t *testing.T) {

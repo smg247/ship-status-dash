@@ -164,6 +164,7 @@ type MockSLOWorkspaceRepository struct {
 	Items    []types.SLOWorkspaceItem
 	ListErr  error
 	WriteErr error
+	nextLink uint
 }
 
 func (m *MockSLOWorkspaceRepository) ListByTeam(team string) ([]types.SLOWorkspaceItem, error) {
@@ -203,15 +204,13 @@ func (m *MockSLOWorkspaceRepository) DeleteItem(team, kind, itemKey string) erro
 	if m.WriteErr != nil {
 		return m.WriteErr
 	}
-	var kept []types.SLOWorkspaceItem
-	for _, item := range m.Items {
+	for i, item := range m.Items {
 		if item.Team == team && item.Kind == kind && item.ItemKey == itemKey {
-			continue
+			m.Items = append(m.Items[:i], m.Items[i+1:]...)
+			return nil
 		}
-		kept = append(kept, item)
 	}
-	m.Items = kept
-	return nil
+	return gorm.ErrRecordNotFound
 }
 
 func (m *MockSLOWorkspaceRepository) DeleteItems(ids []uint) error {
@@ -245,10 +244,42 @@ func (m *MockSLOWorkspaceRepository) AddLink(link *types.SLOWorkspaceLink) (*typ
 	if m.WriteErr != nil {
 		return nil, m.WriteErr
 	}
-	link.ID = 1
-	return link, nil
+	for i := range m.Items {
+		if m.Items[i].ID != link.ItemID {
+			continue
+		}
+		for j := range m.Items[i].Links {
+			existing := m.Items[i].Links[j]
+			if existing.URL == link.URL && existing.LinkType == link.LinkType {
+				return &existing, nil
+			}
+		}
+		m.nextLink++
+		link.ID = m.nextLink
+		m.Items[i].Links = append(m.Items[i].Links, *link)
+		stored := m.Items[i].Links[len(m.Items[i].Links)-1]
+		return &stored, nil
+	}
+	return nil, gorm.ErrRecordNotFound
 }
 
 func (m *MockSLOWorkspaceRepository) DeleteLink(team, kind, itemKey string, linkID uint) error {
-	return m.WriteErr
+	if m.WriteErr != nil {
+		return m.WriteErr
+	}
+	for i := range m.Items {
+		item := &m.Items[i]
+		if item.Team != team || item.Kind != kind || item.ItemKey != itemKey {
+			continue
+		}
+		for j := range item.Links {
+			if item.Links[j].ID != linkID {
+				continue
+			}
+			item.Links = append(item.Links[:j], item.Links[j+1:]...)
+			return nil
+		}
+		return gorm.ErrRecordNotFound
+	}
+	return gorm.ErrRecordNotFound
 }

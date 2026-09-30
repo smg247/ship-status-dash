@@ -1,21 +1,27 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"ship-status-dash/pkg/auth"
 	"ship-status-dash/pkg/config"
 	"ship-status-dash/pkg/outage"
 	"ship-status-dash/pkg/repositories"
+	payloadv1 "ship-status-dash/pkg/slo/payloadstreams/v1"
 	"ship-status-dash/pkg/types"
 )
 
@@ -26,6 +32,10 @@ func newTestHandlers(t *testing.T, cfg *types.DashboardConfig, om outage.OutageM
 
 // newTestHandlersWithGroups is like newTestHandlers but pre-populates group membership.
 func newTestHandlersWithGroups(t *testing.T, cfg *types.DashboardConfig, om outage.OutageManager, groups map[string][]string) *Handlers {
+	return newTestHandlersWithSLO(t, cfg, om, groups, &repositories.MockSLOWorkspaceRepository{})
+}
+
+func newTestHandlersWithSLO(t *testing.T, cfg *types.DashboardConfig, om outage.OutageManager, groups map[string][]string, sloRepo repositories.SLOWorkspaceRepository) *Handlers {
 	t.Helper()
 	cfgManager, err := config.NewManager("", func(string) (*types.DashboardConfig, error) {
 		return cfg, nil
@@ -37,7 +47,6 @@ func newTestHandlersWithGroups(t *testing.T, cfg *types.DashboardConfig, om outa
 	triageNoteRepo := &repositories.MockTriageNoteRepository{}
 	outageLinkRepo := &repositories.MockOutageLinkRepository{}
 	cache := &auth.MockGroupMembershipProvider{Groups: groups}
-	sloRepo := &repositories.MockSLOWorkspaceRepository{}
 	return NewHandlers(logrus.New(), cfgManager, om, pingRepo, triageNoteRepo, outageLinkRepo, sloRepo, cache)
 }
 
@@ -98,6 +107,72 @@ func TestIsUserAuthorizedForComponent(t *testing.T) {
 			groups := map[string][]string{"test-group": {"groupuser", "anotheruser"}}
 			h := newTestHandlersWithGroups(t, cfg, &outage.MockOutageManager{}, groups)
 			assert.Equal(t, tt.authorized, h.IsUserAuthorizedForComponent(tt.user, component))
+		})
+	}
+}
+
+func TestIsUserAuthorizedForTeamSLO(t *testing.T) {
+	component := &types.Component{
+		Name: "TRT Incidents", Slug: "trt-incidents", SLOComponent: true,
+		Owners: []types.Owner{{User: "component-owner"}, {User: "both"}},
+	}
+	cfg := &types.DashboardConfig{
+		Components: []*types.Component{component},
+		TeamSLOs: []types.TeamSLOConfig{{
+			Team: "TRT",
+			Owners: []types.Owner{
+				{User: "team-user"},
+				{User: "both"},
+				{ServiceAccount: "system:serviceaccount:ship-status:chai-bot"},
+				{RoverGroup: "trt-group"},
+			},
+			SLOComponents: []string{"trt-incidents"},
+		}},
+	}
+	groups := map[string][]string{"trt-group": {"group-member"}}
+	h := newTestHandlersWithGroups(t, cfg, &outage.MockOutageManager{}, groups)
+
+	tests := []struct {
+		name       string
+		user       string
+		team       string
+		authorized bool
+	}{
+		{name: "team user", user: "team-user", team: "TRT", authorized: true},
+		{name: "team service account", user: "system:serviceaccount:ship-status:chai-bot", team: "TRT", authorized: true},
+		{name: "team rover group member", user: "group-member", team: "TRT", authorized: true},
+		{name: "component owner is not a team SLO owner", user: "component-owner", team: "TRT", authorized: false},
+		{name: "unknown team", user: "team-user", team: "Nope", authorized: false},
+		{name: "unknown user", user: "stranger", team: "TRT", authorized: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.authorized, h.IsUserAuthorizedForTeamSLO(tt.user, tt.team))
+		})
+	}
+
+	userTests := []struct {
+		name       string
+		user       string
+		components []string
+		teams      []string
+	}{
+		{name: "component owner", user: "component-owner", components: []string{"trt-incidents"}, teams: []string{}},
+		{name: "team owner", user: "team-user", components: []string{}, teams: []string{"TRT"}},
+		{name: "both", user: "both", components: []string{"trt-incidents"}, teams: []string{"TRT"}},
+		{name: "rover group member", user: "group-member", components: []string{}, teams: []string{"TRT"}},
+	}
+	for _, tt := range userTests {
+		t.Run("api user "+tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/user", nil)
+			req = req.WithContext(context.WithValue(req.Context(), userContextKey, tt.user))
+			rr := httptest.NewRecorder()
+			h.GetAuthenticatedUserJSON(rr, req)
+			require.Equal(t, http.StatusOK, rr.Code)
+			var got AuthenticatedUser
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+			assert.Equal(t, tt.components, got.Components)
+			assert.Equal(t, tt.teams, got.TeamSLOs)
 		})
 	}
 }
@@ -366,4 +441,309 @@ func TestListAPIsOmitSLOComponent(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &subs))
 	require.Len(t, subs, 1)
 	assert.Equal(t, "Sippy", subs[0].ComponentName)
+}
+
+func sloHandlerConfig() *types.DashboardConfig {
+	raw := []byte(`{"window":"24h","min_accepted":1,"recent_payloads":2,"streams":[{"release_controller":"amd64","name":"nightly"}]}`)
+	return &types.DashboardConfig{
+		Components: []*types.Component{{
+			Name: "TRT Incidents", Slug: "trt-incidents", SLOComponent: true,
+			Subcomponents: []types.SubComponent{{Name: "Incidents", Slug: "incidents"}},
+		}},
+		TeamSLOs: []types.TeamSLOConfig{{
+			Team:          "TRT",
+			Owners:        []types.Owner{{User: "developer"}},
+			SLOComponents: []string{"trt-incidents"},
+			SLOs: []types.NamedSLO{{
+				Name:   "accepted-payload-per-day",
+				Source: payloadv1.Source,
+				Workspace: &types.SLOWorkspace{
+					Kind:          payloadv1.Kind,
+					SchemaVersion: payloadv1.SchemaVersion,
+					Spec:          raw,
+				},
+			}},
+		}},
+	}
+}
+
+const validSLOItemBody = `{
+	"kind":"payload_streams",
+	"schema_version":1,
+	"item_key":"new-item",
+	"group_key":"nightly",
+	"occurred_at":"2026-09-25T12:00:00Z",
+	"outcome":"Rejected",
+	"details":{"payload_url":"https://example.com/p","jobs":[{"name":"job","url":"https://example.com/j","state":"failure"}]}
+}`
+
+func keptSLOItem() types.SLOWorkspaceItem {
+	return types.SLOWorkspaceItem{
+		Model:    gorm.Model{ID: 3},
+		Team:     "TRT",
+		Kind:     payloadv1.Kind,
+		ItemKey:  "keep",
+		GroupKey: "nightly",
+		Outcome:  "Rejected",
+		Links: []types.SLOWorkspaceLink{{
+			Model:    gorm.Model{ID: 9},
+			ItemID:   3,
+			URL:      "https://example.com/l",
+			LinkType: "jira",
+		}},
+	}
+}
+
+func TestGetTeamSLOJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		listErr   error
+		outageErr bool
+		wantCode  int
+		wantErr   string
+	}{
+		{
+			name:     "list failure",
+			listErr:  errors.New("db"),
+			wantCode: http.StatusInternalServerError,
+			wantErr:  "Failed to load team SLO",
+		},
+		{
+			name:      "outage lookup failure",
+			outageErr: true,
+			wantCode:  http.StatusInternalServerError,
+			wantErr:   "Failed to load team SLO",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &repositories.MockSLOWorkspaceRepository{ListErr: tt.listErr}
+			om := &outage.MockOutageManager{}
+			if tt.outageErr {
+				om.GetActiveOutagesForComponentFn = func(string) ([]types.Outage, error) {
+					return nil, errors.New("lookup")
+				}
+			}
+			h := newTestHandlersWithSLO(t, sloHandlerConfig(), om, nil, repo)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/teams/TRT/slo", nil)
+			req = mux.SetURLVars(req, map[string]string{"team": "TRT"})
+			rr := httptest.NewRecorder()
+			h.GetTeamSLOJSON(rr, req)
+
+			assert.Equal(t, tt.wantCode, rr.Code)
+			var got map[string]string
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+			assert.Equal(t, tt.wantErr, got["error"])
+		})
+	}
+}
+
+func TestGetTeamSLOSummaryJSON(t *testing.T) {
+	repo := &repositories.MockSLOWorkspaceRepository{ListErr: errors.New("db")}
+	h := newTestHandlersWithSLO(t, sloHandlerConfig(), &outage.MockOutageManager{}, nil, repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/teams/slo-summary", nil)
+	rr := httptest.NewRecorder()
+	h.GetTeamSLOSummaryJSON(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	assert.Equal(t, "Failed to load SLO summary", got["error"])
+}
+
+func TestPutSLOItemJSON(t *testing.T) {
+	item := keptSLOItem()
+	repo := &repositories.MockSLOWorkspaceRepository{
+		Items:    []types.SLOWorkspaceItem{item},
+		WriteErr: errors.New("db"),
+	}
+	h := newTestHandlersWithSLO(t, sloHandlerConfig(), &outage.MockOutageManager{}, nil, repo)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/teams/TRT/slo/items", bytes.NewBufferString(validSLOItemBody))
+	req = req.WithContext(context.WithValue(req.Context(), userContextKey, "developer"))
+	req = mux.SetURLVars(req, map[string]string{"team": "TRT"})
+	rr := httptest.NewRecorder()
+	h.PutSLOItemJSON(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	assert.Equal(t, "Failed to save SLO item", got["error"])
+	assert.Equal(t, []types.SLOWorkspaceItem{item}, repo.Items)
+}
+
+func TestDeleteSLOItemJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		itemKey  string
+		writeErr error
+		wantCode int
+		wantErr  string
+	}{
+		{
+			name:     "missing item",
+			itemKey:  "missing",
+			wantCode: http.StatusNotFound,
+			wantErr:  "SLO item not found",
+		},
+		{
+			name:     "write failure",
+			itemKey:  "keep",
+			writeErr: errors.New("db"),
+			wantCode: http.StatusInternalServerError,
+			wantErr:  "Failed to delete SLO item",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := keptSLOItem()
+			repo := &repositories.MockSLOWorkspaceRepository{
+				Items:    []types.SLOWorkspaceItem{item},
+				WriteErr: tt.writeErr,
+			}
+			h := newTestHandlersWithSLO(t, sloHandlerConfig(), &outage.MockOutageManager{}, nil, repo)
+
+			req := httptest.NewRequest(http.MethodDelete, "/api/teams/TRT/slo/items/"+payloadv1.Kind+"/"+tt.itemKey, nil)
+			req = req.WithContext(context.WithValue(req.Context(), userContextKey, "developer"))
+			req = mux.SetURLVars(req, map[string]string{
+				"team": "TRT", "kind": payloadv1.Kind, "itemKey": tt.itemKey,
+			})
+			rr := httptest.NewRecorder()
+			h.DeleteSLOItemJSON(rr, req)
+
+			assert.Equal(t, tt.wantCode, rr.Code)
+			var got map[string]string
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+			assert.Equal(t, tt.wantErr, got["error"])
+			assert.Equal(t, []types.SLOWorkspaceItem{item}, repo.Items)
+		})
+	}
+}
+
+func TestPutSLOItemLinkJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		itemKey  string
+		body     string
+		listErr  error
+		writeErr error
+		wantCode int
+		wantErr  string
+	}{
+		{
+			name:     "write failure",
+			itemKey:  "keep",
+			body:     `{"url":"https://example.com/new","link_type":"jira"}`,
+			writeErr: errors.New("db"),
+			wantCode: http.StatusInternalServerError,
+			wantErr:  "Failed to add SLO link",
+		},
+		{
+			name:     "list failure",
+			itemKey:  "keep",
+			body:     `{"url":"https://example.com/new","link_type":"jira"}`,
+			listErr:  errors.New("db"),
+			wantCode: http.StatusInternalServerError,
+			wantErr:  "Failed to load SLO item",
+		},
+		{
+			name:     "empty url",
+			itemKey:  "keep",
+			body:     `{"url":" ","link_type":"jira"}`,
+			wantCode: http.StatusBadRequest,
+			wantErr:  "url is required",
+		},
+		{
+			name:     "missing item",
+			itemKey:  "missing",
+			body:     `{"url":"https://example.com/new","link_type":"jira"}`,
+			wantCode: http.StatusNotFound,
+			wantErr:  "SLO item not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := keptSLOItem()
+			repo := &repositories.MockSLOWorkspaceRepository{
+				Items:    []types.SLOWorkspaceItem{item},
+				ListErr:  tt.listErr,
+				WriteErr: tt.writeErr,
+			}
+			h := newTestHandlersWithSLO(t, sloHandlerConfig(), &outage.MockOutageManager{}, nil, repo)
+
+			req := httptest.NewRequest(http.MethodPut, "/api/teams/TRT/slo/items/"+payloadv1.Kind+"/"+tt.itemKey+"/links", bytes.NewBufferString(tt.body))
+			req = req.WithContext(context.WithValue(req.Context(), userContextKey, "developer"))
+			req = mux.SetURLVars(req, map[string]string{
+				"team": "TRT", "kind": payloadv1.Kind, "itemKey": tt.itemKey,
+			})
+			rr := httptest.NewRecorder()
+			h.PutSLOItemLinkJSON(rr, req)
+
+			assert.Equal(t, tt.wantCode, rr.Code)
+			var got map[string]string
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+			assert.Equal(t, tt.wantErr, got["error"])
+			assert.Equal(t, []types.SLOWorkspaceItem{item}, repo.Items)
+		})
+	}
+}
+
+func TestDeleteSLOItemLinkJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		linkID   string
+		writeErr error
+		wantCode int
+		wantErr  string
+	}{
+		{
+			name:     "missing link",
+			linkID:   "4",
+			wantCode: http.StatusNotFound,
+			wantErr:  "SLO link not found",
+		},
+		{
+			name:     "write failure",
+			linkID:   "9",
+			writeErr: errors.New("db"),
+			wantCode: http.StatusInternalServerError,
+			wantErr:  "Failed to delete SLO link",
+		},
+		{
+			name:     "bad link id",
+			linkID:   "nope",
+			wantCode: http.StatusBadRequest,
+			wantErr:  "invalid link id",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := keptSLOItem()
+			repo := &repositories.MockSLOWorkspaceRepository{
+				Items:    []types.SLOWorkspaceItem{item},
+				WriteErr: tt.writeErr,
+			}
+			h := newTestHandlersWithSLO(t, sloHandlerConfig(), &outage.MockOutageManager{}, nil, repo)
+
+			req := httptest.NewRequest(http.MethodDelete, "/api/teams/TRT/slo/items/"+payloadv1.Kind+"/keep/links/"+tt.linkID, nil)
+			req = req.WithContext(context.WithValue(req.Context(), userContextKey, "developer"))
+			req = mux.SetURLVars(req, map[string]string{
+				"team": "TRT", "kind": payloadv1.Kind, "itemKey": "keep", "linkId": tt.linkID,
+			})
+			rr := httptest.NewRecorder()
+			h.DeleteSLOItemLinkJSON(rr, req)
+
+			assert.Equal(t, tt.wantCode, rr.Code)
+			var got map[string]string
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+			assert.Equal(t, tt.wantErr, got["error"])
+			assert.Equal(t, []types.SLOWorkspaceItem{item}, repo.Items)
+		})
+	}
 }

@@ -11,11 +11,16 @@ import type {
   TriageNote,
   OutageLink,
   OutageRelationship,
+  SLOEvaluation,
+  SLOItem,
+  TeamSLO,
+  TeamSLOSummary,
 } from '../../src/types'
 
 interface MockAuthUser {
   username: string
   components: string[]
+  team_slos?: string[]
 }
 
 const now = new Date().toISOString()
@@ -297,6 +302,100 @@ export const mockExcludedUnhealthySubComponent: SubComponentListItem = {
 export const mockAuthUser: MockAuthUser = {
   username: 'testuser',
   components: ['prow', 'build-farm', 'sippy', 'Prow', 'Build Farm', 'Sippy'],
+}
+
+export const mockTRTSLOUser: MockAuthUser = {
+  username: 'trt-owner',
+  components: [],
+  team_slos: ['TRT'],
+}
+
+const trtOccurredAt = '2026-09-25T12:00:00Z'
+
+export const mockTRTPayloadItem: SLOItem = {
+  id: 7,
+  kind: 'payload_streams',
+  schema_version: 1,
+  item_key: 'nightly-rejected',
+  group_key: '5.1.0-0.nightly',
+  occurred_at: trtOccurredAt,
+  outcome: 'Rejected',
+  details: {
+    payload_url: 'https://example.com/payload',
+    jobs: [
+      {
+        name: 'e2e-job',
+        url: 'https://example.com/payload/job',
+        state: 'failure',
+        recurring_count: 3,
+      },
+    ],
+  },
+  notes: '',
+  updated_by: 'developer',
+  links: [{ ID: 4, url: 'https://redhat.atlassian.net/browse/TRT-1', link_type: 'jira' }],
+}
+
+const trtEvaluation: SLOEvaluation = {
+  name: 'accepted-payload-per-day',
+  display_name: '1 accepted payload per day',
+  source: 'payload_acceptance',
+  met: false,
+  result: {
+    window: '24h',
+    target: { min_accepted: 1 },
+    groups: [{ key: '5.1.0-0.nightly', accepted: 0, met: false, last_accepted_at: trtOccurredAt }],
+  },
+}
+
+const trtIncident: Outage = {
+  ID: 42,
+  CreatedAt: trtOccurredAt,
+  UpdatedAt: trtOccurredAt,
+  last_auditable_update: trtOccurredAt,
+  component_name: 'trt-incidents',
+  sub_component_name: 'incidents',
+  severity: 'Degraded',
+  start_time: trtOccurredAt,
+  end_time: { Time: '', Valid: false },
+  auto_resolve: false,
+  description: 'CI payload rejected',
+  confirmed_at: { Time: trtOccurredAt, Valid: true },
+}
+
+const trtSLOComponents = [
+  {
+    component: 'TRT Incidents',
+    sub_component: 'Incidents',
+    outages: [trtIncident],
+  },
+]
+
+export const mockTRTTeamSLO: TeamSLO = {
+  team: 'TRT',
+  workspace: {
+    kind: 'payload_streams',
+    schema_version: 1,
+    spec: {
+      window: '24h',
+      min_accepted: 1,
+      recent_payloads: 2,
+      streams: [{ release_controller: 'amd64', name: '5.1.0-0.nightly' }],
+    },
+  },
+  evaluations: [trtEvaluation],
+  slo_components: trtSLOComponents,
+  items: [mockTRTPayloadItem],
+}
+
+export const mockTRTSummary: TeamSLOSummary = {
+  teams: [
+    {
+      team: 'TRT',
+      evaluations: [trtEvaluation],
+      slo_components: trtSLOComponents,
+    },
+  ],
 }
 
 export const mockSuspectedOutage: SuspectedOutageInfo = {

@@ -14,7 +14,11 @@ import (
 )
 
 func payloadWorkspace(streams ...string) *types.SLOWorkspace {
-	settings := payloadv1.Settings{Window: "24h", MinAccepted: 1, RecentPayloads: 2}
+	return payloadWorkspaceMin(1, streams...)
+}
+
+func payloadWorkspaceMin(min int, streams ...string) *types.SLOWorkspace {
+	settings := payloadv1.Settings{Window: "24h", MinAccepted: min, RecentPayloads: 2}
 	for _, name := range streams {
 		settings.Streams = append(settings.Streams, payloadv1.Stream{ReleaseController: "amd64", Name: name})
 	}
@@ -23,6 +27,10 @@ func payloadWorkspace(streams ...string) *types.SLOWorkspace {
 		panic(err)
 	}
 	return &types.SLOWorkspace{Kind: payloadv1.Kind, SchemaVersion: payloadv1.SchemaVersion, Spec: raw}
+}
+
+func at(t time.Time) *time.Time {
+	return &t
 }
 
 func payloadResult(t *testing.T, ev Evaluation) payloadv1.Result {
@@ -37,6 +45,9 @@ func TestEvaluate(t *testing.T) {
 	oldAccepted := now.Add(-32 * time.Hour)
 	inWindow := now.Add(-2 * time.Hour)
 
+	cutoff := now.Add(-24 * time.Hour)
+	justBefore := cutoff.Add(-time.Millisecond)
+
 	tests := []struct {
 		name         string
 		team         *types.TeamSLOConfig
@@ -44,6 +55,8 @@ func TestEvaluate(t *testing.T) {
 		wantLen      int
 		wantMet      bool
 		wantAccepted []int
+		wantGroupMet []bool
+		wantLast     []*time.Time
 		wantWindow   string
 		wantMin      int
 	}{
@@ -60,7 +73,7 @@ func TestEvaluate(t *testing.T) {
 				{Kind: payloadv1.Kind, GroupKey: "5.0.0-0.nightly", Outcome: "Rejected", OccurredAt: now.Add(-3 * time.Hour)},
 				{Kind: payloadv1.Kind, GroupKey: "4.19-gone", Outcome: "Accepted", OccurredAt: now.Add(-time.Hour)},
 			},
-			wantLen: 1, wantWindow: "24h", wantMin: 1, wantAccepted: []int{1, 0},
+			wantLen: 1, wantMet: false, wantWindow: "24h", wantMin: 1, wantAccepted: []int{1, 0}, wantGroupMet: []bool{true, false},
 		},
 		{
 			name: "ignores future payloads",
@@ -74,7 +87,83 @@ func TestEvaluate(t *testing.T) {
 				{Kind: payloadv1.Kind, GroupKey: "5.1.0-0.nightly", Outcome: "Accepted", OccurredAt: now},
 				{Kind: payloadv1.Kind, GroupKey: "5.0.0-0.nightly", Outcome: "Accepted", OccurredAt: now.Add(time.Hour)},
 			},
-			wantLen: 1, wantAccepted: []int{2, 0},
+			wantLen: 1, wantMet: false, wantAccepted: []int{2, 0}, wantGroupMet: []bool{true, false},
+			wantLast: []*time.Time{at(now), nil},
+		},
+		{
+			name: "meets min_accepted of 2",
+			team: &types.TeamSLOConfig{Team: "TRT", SLOs: []types.NamedSLO{{
+				Name: "accepted-payload-per-day", Source: payloadv1.Source,
+				Workspace: payloadWorkspaceMin(2, "nightly"),
+			}}},
+			items: []types.SLOWorkspaceItem{
+				{Kind: payloadv1.Kind, GroupKey: "nightly", Outcome: "Accepted", OccurredAt: now.Add(-3 * time.Hour)},
+				{Kind: payloadv1.Kind, GroupKey: "nightly", Outcome: "Accepted", OccurredAt: now.Add(-time.Hour)},
+				{Kind: payloadv1.Kind, GroupKey: "nightly", Outcome: "Rejected", OccurredAt: now.Add(-time.Minute)},
+			},
+			wantLen: 1, wantMet: true, wantWindow: "24h", wantMin: 2, wantAccepted: []int{2}, wantGroupMet: []bool{true},
+		},
+		{
+			name: "misses when accepted count is below min_accepted",
+			team: &types.TeamSLOConfig{Team: "TRT", SLOs: []types.NamedSLO{{
+				Name: "accepted-payload-per-day", Source: payloadv1.Source,
+				Workspace: payloadWorkspaceMin(2, "nightly"),
+			}}},
+			items: []types.SLOWorkspaceItem{
+				{Kind: payloadv1.Kind, GroupKey: "nightly", Outcome: "Accepted", OccurredAt: inWindow},
+			},
+			wantLen: 1, wantMet: false, wantWindow: "24h", wantMin: 2, wantAccepted: []int{1}, wantGroupMet: []bool{false},
+		},
+		{
+			name: "counts one above min_accepted",
+			team: &types.TeamSLOConfig{Team: "TRT", SLOs: []types.NamedSLO{{
+				Name: "accepted-payload-per-day", Source: payloadv1.Source,
+				Workspace: payloadWorkspaceMin(2, "nightly"),
+			}}},
+			items: []types.SLOWorkspaceItem{
+				{Kind: payloadv1.Kind, GroupKey: "nightly", Outcome: "Accepted", OccurredAt: now.Add(-5 * time.Hour)},
+				{Kind: payloadv1.Kind, GroupKey: "nightly", Outcome: "Accepted", OccurredAt: now.Add(-4 * time.Hour)},
+				{Kind: payloadv1.Kind, GroupKey: "nightly", Outcome: "Accepted", OccurredAt: now.Add(-3 * time.Hour)},
+			},
+			wantLen: 1, wantMet: true, wantMin: 2, wantAccepted: []int{3}, wantGroupMet: []bool{true},
+		},
+		{
+			name: "counts the cutoff and records an older miss as last accepted",
+			team: &types.TeamSLOConfig{Team: "TRT", SLOs: []types.NamedSLO{{
+				Name: "accepted-payload-per-day", Source: payloadv1.Source,
+				Workspace: payloadWorkspace("at-cutoff", "before-cutoff"),
+			}}},
+			items: []types.SLOWorkspaceItem{
+				{Kind: payloadv1.Kind, GroupKey: "at-cutoff", Outcome: "Accepted", OccurredAt: cutoff},
+				{Kind: payloadv1.Kind, GroupKey: "before-cutoff", Outcome: "Accepted", OccurredAt: justBefore},
+				{Kind: payloadv1.Kind, GroupKey: "at-cutoff", Outcome: "Accepted", OccurredAt: now.Add(time.Hour)},
+			},
+			wantLen: 1, wantMet: false, wantAccepted: []int{1, 0}, wantGroupMet: []bool{true, false},
+			wantLast: []*time.Time{at(cutoff), at(justBefore)},
+		},
+		{
+			name: "counts a payload at now",
+			team: &types.TeamSLOConfig{Team: "TRT", SLOs: []types.NamedSLO{{
+				Name: "accepted-payload-per-day", Source: payloadv1.Source,
+				Workspace: payloadWorkspace("nightly"),
+			}}},
+			items: []types.SLOWorkspaceItem{
+				{Kind: payloadv1.Kind, GroupKey: "nightly", Outcome: "Accepted", OccurredAt: now},
+			},
+			wantLen: 1, wantMet: true, wantAccepted: []int{1}, wantGroupMet: []bool{true},
+			wantLast: []*time.Time{at(now)},
+		},
+		{
+			name: "ignores a future payload for the count and last accepted time",
+			team: &types.TeamSLOConfig{Team: "TRT", SLOs: []types.NamedSLO{{
+				Name: "accepted-payload-per-day", Source: payloadv1.Source,
+				Workspace: payloadWorkspace("nightly"),
+			}}},
+			items: []types.SLOWorkspaceItem{
+				{Kind: payloadv1.Kind, GroupKey: "nightly", Outcome: "Accepted", OccurredAt: now.Add(time.Hour)},
+			},
+			wantLen: 1, wantMet: false, wantAccepted: []int{0}, wantGroupMet: []bool{false},
+			wantLast: []*time.Time{nil},
 		},
 		{
 			name:    "ignores unknown source",
@@ -98,9 +187,22 @@ func TestEvaluate(t *testing.T) {
 				assert.Equal(t, tt.wantMin, result.Target.MinAccepted)
 			}
 			require.Len(t, result.Groups, len(tt.wantAccepted))
+			require.Len(t, tt.wantGroupMet, len(tt.wantAccepted))
 			for i, accepted := range tt.wantAccepted {
 				assert.Equal(t, accepted, result.Groups[i].Accepted)
-				assert.Equal(t, accepted > 0, result.Groups[i].Met)
+				assert.Equal(t, tt.wantGroupMet[i], result.Groups[i].Met)
+			}
+			if tt.wantLast != nil {
+				require.Len(t, tt.wantLast, len(result.Groups))
+				for i, want := range tt.wantLast {
+					got := result.Groups[i].LastAcceptedAt
+					if want == nil {
+						assert.Nil(t, got)
+						continue
+					}
+					require.NotNil(t, got)
+					assert.True(t, got.Equal(*want), "group %d last accepted %s, want %s", i, got, want)
+				}
 			}
 		})
 	}
@@ -129,8 +231,30 @@ func TestPruneAndDisplay(t *testing.T) {
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []uint{4, 5}, drop)
 
-	display := payloadv1.DisplayItems(settings, items)
+	shuffled := append([]types.SLOWorkspaceItem(nil), items...)
+	for i, j := 0, len(shuffled)-1; i < j; i, j = i+1, j-1 {
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	}
+	display := payloadv1.DisplayItems(settings, shuffled)
 	require.Len(t, display, 2)
 	assert.Equal(t, uint(1), display[0].ID)
 	assert.Equal(t, uint(2), display[1].ID)
+
+	same := now.Add(-time.Hour)
+	tieSettings := payloadv1.Settings{
+		Window: "24h", MinAccepted: 1, RecentPayloads: 2,
+		Streams: []payloadv1.Stream{
+			{ReleaseController: "amd64", Name: "nightly"},
+			{ReleaseController: "amd64", Name: "ci"},
+		},
+	}
+	tied := []types.SLOWorkspaceItem{
+		{Model: gorm.Model{ID: 2}, ItemKey: "low", GroupKey: "nightly", OccurredAt: same},
+		{Model: gorm.Model{ID: 1}, ItemKey: "other", GroupKey: "ci", OccurredAt: now.Add(-time.Minute)},
+		{Model: gorm.Model{ID: 8}, ItemKey: "high", GroupKey: "nightly", OccurredAt: same},
+		{Model: gorm.Model{ID: 4}, ItemKey: "newest", GroupKey: "nightly", OccurredAt: now},
+	}
+	ordered := payloadv1.DisplayItems(tieSettings, tied)
+	require.Len(t, ordered, 3)
+	assert.Equal(t, []uint{4, 8, 1}, []uint{ordered[0].ID, ordered[1].ID, ordered[2].ID})
 }

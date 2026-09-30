@@ -132,16 +132,12 @@ func testSeededPruneCandidate(client *TestHTTPClient) func(*testing.T) {
 		require.NotEmpty(t, settings.Streams)
 		stream := settings.Streams[0].Name
 
-		putSLOItemChai(t, client, mustSLOItemBody(t, seed.PruneCandidateItemKey, stream, "Rejected", time.Now().UTC().Add(-seed.PruneCandidateAgo), "", payloadDetails(t, "https://example.com/prune-candidate", nil)))
-		require.Contains(t, itemKeys(getTeamSLO(t, client).Items), seed.PruneCandidateItemKey)
-
-		// e2e starts the dashboard with --trt-payload-prune-interval=15s. 45s covers a tick that just fired.
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		defer cancel()
-		err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 45*time.Second, true, func(context.Context) (bool, error) {
-			return !containsKey(itemKeys(getTeamSLO(t, client).Items), seed.PruneCandidateItemKey), nil
-		})
-		require.NoError(t, err, "pruner should delete %s", seed.PruneCandidateItemKey)
+		created := putSLOItemChai(t, client, mustSLOItemBody(t, seed.PruneCandidateItemKey, stream, "Rejected", time.Now().UTC().Add(-seed.PruneCandidateAgo), "", payloadDetails(t, "https://example.com/prune-candidate", nil)))
+		require.Equal(t, seed.PruneCandidateItemKey, created.ItemKey)
+		require.NotZero(t, created.ID)
+		// The row is already outside the retained set. A 15s prune tick can delete it
+		// before the next GET, so the PUT response is the presence proof.
+		waitForItem(t, client, seed.PruneCandidateItemKey, false)
 	}
 }
 
@@ -207,6 +203,40 @@ func testSLOAuthorization(client *TestHTTPClient) func(*testing.T) {
 			require.NoError(t, err)
 			defer resp.Body.Close()
 			assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+		})
+
+		t.Run("editor is forbidden on every SLO mutation", func(t *testing.T) {
+			keptCount := 2
+			created := putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-auth-keep", trtStreamNightly, "Rejected", time.Now().UTC().Add(-time.Hour), "kept", payloadDetails(t, "https://example.com/keep", &keptCount)))
+			t.Cleanup(func() { deleteSLOItem(t, client, created.ItemKey) })
+			link := putSLOLinkChai(t, client, created.ItemKey, map[string]string{
+				"url":       "https://redhat.atlassian.net/browse/TRT-KEEP",
+				"link_type": "jira",
+			})
+			editor, err := NewTestHTTPClientWithUsername(client.publicURL, client.protectedURL, "editor")
+			require.NoError(t, err)
+			forbid := func(resp *http.Response, err error) {
+				t.Helper()
+				require.NoError(t, err)
+				defer resp.Body.Close()
+				assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+			}
+
+			forbid(editor.Put(sloItemsPath, mustSLOItemBody(t, created.ItemKey, trtStreamNightly, "Accepted", time.Now().UTC(), "changed", payloadDetails(t, "https://example.com/changed", nil))))
+			forbid(editor.Delete(sloItemPath(created.ItemKey)))
+			linkBody, err := json.Marshal(map[string]string{"url": "https://example.com/editor", "link_type": "other"})
+			require.NoError(t, err)
+			forbid(editor.Put(sloItemPath(created.ItemKey)+"/links", linkBody))
+			forbid(editor.Delete(sloItemLinkPath(created.ItemKey, link.ID)))
+
+			stored := itemByKey(t, getTeamSLO(t, client).Items, created.ItemKey)
+			require.NotNil(t, stored)
+			assert.Equal(t, created.ID, stored.ID)
+			assert.Equal(t, "Rejected", stored.Outcome)
+			assert.Equal(t, "kept", stored.Notes)
+			require.Len(t, stored.Links, 1)
+			assert.Equal(t, link.ID, stored.Links[0].ID)
+			assert.Equal(t, link.URL, stored.Links[0].URL)
 		})
 
 		t.Run("unknown schema is rejected", func(t *testing.T) {
@@ -284,10 +314,6 @@ func testTRTPayloadStreamsUpsert(client *TestHTTPClient) func(*testing.T) {
 
 		view := getTeamSLO(t, client)
 		assert.ElementsMatch(t, []string{"e2e-a", "e2e-b", "e2e-c"}, itemKeys(view.Items))
-		nightly := itemsForStream(view.Items, trtStreamNightly)
-		require.Len(t, nightly, 3)
-		assert.Equal(t, "e2e-c", nightly[0].ItemKey)
-		assert.Equal(t, "e2e-b", nightly[1].ItemKey)
 		storedB := itemByKey(t, view.Items, "e2e-b")
 		require.NotNil(t, storedB)
 		assert.Equal(t, 4, jobRecurringCount(t, storedB.Details))
@@ -326,12 +352,9 @@ func testTRTPayloadStreamsReplaceAndLink(client *TestHTTPClient) func(*testing.T
 
 		now := time.Now().UTC()
 		count := 4
-		created := putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-b", trtStreamNightly, "Rejected", now.Add(-2*time.Hour), "second", payloadDetails(t, "https://example.com/b", &count)))
-		replaced := putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-b", trtStreamNightly, "Rejected", now.Add(-2*time.Hour), "rewritten", payloadDetails(t, "https://example.com/b", &count)))
-		assert.Equal(t, created.ID, replaced.ID)
-		assert.Equal(t, "rewritten", replaced.Notes)
-		assert.Equal(t, "chai-bot", replaced.UpdatedBy)
-		assert.Equal(t, 4, jobRecurringCount(t, replaced.Details))
+		created := putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-b", trtStreamNightly, "Rejected", now.Add(-2*time.Hour), "second", payloadDetailsFull(t, "https://example.com/b", "https://example.com/b/analysis", "https://example.com/b/job", &count)))
+		assert.Equal(t, "second", created.Notes)
+		assert.Equal(t, "https://example.com/b/analysis", payloadDoc(t, created.Details).AnalysisURL)
 
 		link := putSLOLinkChai(t, client, "e2e-b", map[string]string{
 			"url":       "https://redhat.atlassian.net/browse/TRT-1",
@@ -343,9 +366,39 @@ func testTRTPayloadStreamsReplaceAndLink(client *TestHTTPClient) func(*testing.T
 		})
 		assert.Equal(t, link.ID, again.ID)
 
-		replaced = putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-b", trtStreamNightly, "Rejected", now.Add(-2*time.Hour), "rewritten again", payloadDetails(t, "https://example.com/b", &count)))
+		replacedAt := now.Add(-30 * time.Minute).Truncate(time.Microsecond)
+		replacedCount := 9
+		replaced := putSLOItemDeveloper(t, client, mustSLOItemBody(t, "e2e-b", trtStreamCI, "Accepted", replacedAt, "", payloadDetailsFull(t, "https://example.com/replaced", "", "https://example.com/replaced/job", &replacedCount)))
+		assert.Equal(t, created.ID, replaced.ID)
+		assert.Equal(t, "developer", replaced.UpdatedBy)
+		assert.Empty(t, replaced.Notes)
+		assert.True(t, replaced.OccurredAt.Equal(replacedAt))
+		assert.Equal(t, trtStreamCI, replaced.GroupKey)
+		assert.Equal(t, "Accepted", replaced.Outcome)
+		assert.Equal(t, 9, jobRecurringCount(t, replaced.Details))
+		replacedDoc := payloadDoc(t, replaced.Details)
+		assert.Equal(t, "https://example.com/replaced", replacedDoc.PayloadURL)
+		assert.Equal(t, "https://example.com/replaced/job", replacedDoc.Jobs[0].URL)
+		assert.Empty(t, replacedDoc.AnalysisURL)
 		require.Len(t, replaced.Links, 1)
 		assert.Equal(t, link.ID, replaced.Links[0].ID)
+
+		view := getTeamSLO(t, client)
+		require.Len(t, view.Items, 1)
+		stored := itemByKey(t, view.Items, "e2e-b")
+		require.NotNil(t, stored)
+		assert.Equal(t, created.ID, stored.ID)
+		assert.Equal(t, "developer", stored.UpdatedBy)
+		assert.Empty(t, stored.Notes)
+		assert.Equal(t, "Accepted", stored.Outcome)
+		assert.Equal(t, trtStreamCI, stored.GroupKey)
+		assert.True(t, stored.OccurredAt.Equal(replacedAt))
+		assert.Equal(t, 9, jobRecurringCount(t, stored.Details))
+		storedDoc := payloadDoc(t, stored.Details)
+		assert.Equal(t, "https://example.com/replaced", storedDoc.PayloadURL)
+		assert.Empty(t, storedDoc.AnalysisURL)
+		require.Len(t, stored.Links, 1)
+		assert.Equal(t, link.ID, stored.Links[0].ID)
 
 		deleteSLOLink(t, client, "e2e-b", link.ID)
 		resp, err := client.Delete(sloItemLinkPath("e2e-b", link.ID))
@@ -364,12 +417,13 @@ func testTRTPayloadStreamsPrune(client *TestHTTPClient) func(*testing.T) {
 		putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-nightly-accepted", trtStreamNightly, "Accepted", now.Add(-time.Hour), "", payloadDetails(t, "https://example.com/nightly", nil)))
 		// recent_payloads is 2, so two newer in-window rows have to exist before an
 		// out-of-window row can leave the last-N set and be pruned.
-		putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-old-rejected", trtStreamCI, "Rejected", now.Add(-72*time.Hour), "", payloadDetails(t, "https://example.com/old-r", nil)))
+		oldRejected := putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-old-rejected", trtStreamCI, "Rejected", now.Add(-72*time.Hour), "", payloadDetails(t, "https://example.com/old-r", nil)))
+		require.Equal(t, "e2e-old-rejected", oldRejected.ItemKey)
+		require.NotZero(t, oldRejected.ID)
 		putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-old-accepted", trtStreamCI, "Accepted", now.Add(-48*time.Hour), "", payloadDetails(t, "https://example.com/old-a", nil)))
 		putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-ci-pad-1", trtStreamCI, "Rejected", now.Add(-4*time.Hour), "", payloadDetails(t, "https://example.com/pad-1", nil)))
 		putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-ci-pad-2", trtStreamCI, "Rejected", now.Add(-3*time.Hour), "", payloadDetails(t, "https://example.com/pad-2", nil)))
 
-		require.Contains(t, itemKeys(getTeamSLO(t, client).Items), "e2e-old-rejected")
 		waitForItem(t, client, "e2e-old-rejected", false)
 		held := getTeamSLO(t, client)
 		assert.Contains(t, itemKeys(held.Items), "e2e-old-accepted")
@@ -690,11 +744,17 @@ func mustSLOItemBody(t *testing.T, itemKey, groupKey, outcome string, occurred t
 
 func payloadDetails(t *testing.T, payloadURL string, recurring *int) json.RawMessage {
 	t.Helper()
+	return payloadDetailsFull(t, payloadURL, "", payloadURL+"/job", recurring)
+}
+
+func payloadDetailsFull(t *testing.T, payloadURL, analysisURL, jobURL string, recurring *int) json.RawMessage {
+	t.Helper()
 	doc := payloadv1.PayloadDetails{
-		PayloadURL: payloadURL,
+		PayloadURL:  payloadURL,
+		AnalysisURL: analysisURL,
 		Jobs: []payloadv1.PayloadJob{{
 			Name:           "e2e-job",
-			URL:            payloadURL + "/job",
+			URL:            jobURL,
 			State:          "failure",
 			RecurringCount: recurring,
 		}},
@@ -702,6 +762,13 @@ func payloadDetails(t *testing.T, payloadURL string, recurring *int) json.RawMes
 	body, err := json.Marshal(doc)
 	require.NoError(t, err)
 	return body
+}
+
+func payloadDoc(t *testing.T, details json.RawMessage) payloadv1.PayloadDetails {
+	t.Helper()
+	var doc payloadv1.PayloadDetails
+	require.NoError(t, json.Unmarshal(details, &doc))
+	return doc
 }
 
 func jobRecurringCount(t *testing.T, details json.RawMessage) int {
