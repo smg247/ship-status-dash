@@ -6,6 +6,7 @@ import { getStatusChipColor } from '../../../../../utils/helpers'
 import { getStatusTintStyles } from '../../../../../utils/styles'
 import { formatAge, linkLabel, streamDomId } from '../../format'
 
+import { trtPayloadResult, trtPayloadSettings } from './result'
 import UpsertPayloadItemDialog from './UpsertPayloadItemDialog'
 
 const streamPayloads = (rows: SLOItem[], stream: string): SLOItem[] =>
@@ -98,8 +99,13 @@ const PayloadStreamsWorkspace = ({
 }: PayloadStreamsWorkspaceProps) => {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<SLOItem | undefined>(undefined)
-  const groups = evaluations[0]?.groups ?? []
-  const streams = workspace.streams ?? []
+  const settings = trtPayloadSettings(workspace)
+  const result = trtPayloadResult(evaluations[0])
+  if (!settings) {
+    return null
+  }
+  const groups = result ? result.groups : []
+  const streams = settings.streams
 
   return (
     <Box>
@@ -119,7 +125,7 @@ const PayloadStreamsWorkspace = ({
       </Header>
       {streams.map((stream) => {
         const group = groups.find((item) => item.key === stream.name)
-        const rows = streamPayloads(items, stream.name)
+        const rows = streamPayloads(items, stream.name).slice(0, settings.recent_payloads)
         return (
           <StreamWell
             key={stream.name}
@@ -193,9 +199,9 @@ const PayloadStreamsWorkspace = ({
                         />
                       </td>
                       <td>
-                        {(row.details.jobs ?? []).length === 0 && '-'}
+                        {row.details.jobs.length === 0 && '-'}
                         <ul>
-                          {(row.details.jobs ?? []).map((job) => (
+                          {row.details.jobs.map((job) => (
                             <li key={job.name}>
                               <Link href={job.url} target="_blank" rel="noopener noreferrer">
                                 {job.name}
@@ -213,7 +219,7 @@ const PayloadStreamsWorkspace = ({
                         </ul>
                       </td>
                       <td>
-                        {(row.links ?? []).map((link) => (
+                        {row.links.map((link) => (
                           <div key={link.ID}>
                             <Link href={link.url} target="_blank" rel="noopener noreferrer">
                               {linkLabel(link)}

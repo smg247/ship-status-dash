@@ -1,6 +1,12 @@
 package types
 
-import "ship-status-dash/pkg/utils"
+import (
+	"encoding/json"
+
+	"gopkg.in/yaml.v3"
+
+	"ship-status-dash/pkg/utils"
+)
 
 // DashboardConfig contains the dashboardapplication configuration including component definitions.
 type DashboardConfig struct {
@@ -10,11 +16,21 @@ type DashboardConfig struct {
 	TeamSLOs          []TeamSLOConfig `json:"team_slos,omitempty" yaml:"team_slos,omitempty"`
 }
 
+// AssignSlugs sets component and sub-component slugs from their names.
+// Call this before ValidateTeamSLOs so slo_component lookups use Slug.
+func (c *DashboardConfig) AssignSlugs() {
+	for _, component := range c.Components {
+		component.Slug = utils.Slugify(component.Name)
+		for i := range component.Subcomponents {
+			component.Subcomponents[i].Slug = utils.Slugify(component.Subcomponents[i].Name)
+		}
+	}
+}
+
 func (c *DashboardConfig) GetComponentBySlug(slug string) *Component {
 	for i := range c.Components {
-		component := c.Components[i]
-		if component != nil && component.EffectiveSlug() == slug {
-			return component
+		if c.Components[i].Slug == slug {
+			return c.Components[i]
 		}
 	}
 	return nil
@@ -75,17 +91,6 @@ type Component struct {
 	SLOComponent bool `json:"slo_component,omitempty" yaml:"slo_component,omitempty"`
 }
 
-// EffectiveSlug is the configured slug, or the slug of Name when Slug has not been assigned yet.
-func (c *Component) EffectiveSlug() string {
-	if c == nil {
-		return ""
-	}
-	if c.Slug != "" {
-		return c.Slug
-	}
-	return utils.Slugify(c.Name)
-}
-
 func (c *Component) GetSubComponentBySlug(slug string) *SubComponent {
 	for i := range c.Subcomponents {
 		if c.Subcomponents[i].Slug == slug {
@@ -115,17 +120,6 @@ type SubComponent struct {
 	// ReportThreshold is the number of community reports required to upgrade a suspected outage
 	// to degraded and trigger Slack notifications. Defaults to 3 when unset.
 	ReportThreshold int `json:"report_threshold,omitempty" yaml:"report_threshold,omitempty"`
-}
-
-// EffectiveSlug is the configured slug, or the slug of Name when Slug has not been assigned yet.
-func (s *SubComponent) EffectiveSlug() string {
-	if s == nil {
-		return ""
-	}
-	if s.Slug != "" {
-		return s.Slug
-	}
-	return utils.Slugify(s.Name)
 }
 
 const DefaultReportThreshold = 3
@@ -174,24 +168,66 @@ type NamedSLO struct {
 }
 
 // SLOWorkspace is the versioned document contract shared with producers.
+// Spec holds the schema-specific settings. Generic code does not interpret it.
 type SLOWorkspace struct {
-	Kind           string      `json:"kind" yaml:"kind"`
-	SchemaVersion  int         `json:"schema_version" yaml:"schema_version"`
-	RecentPayloads int         `json:"recent_payloads,omitempty" yaml:"recent_payloads,omitempty"`
-	Streams        []SLOStream `json:"streams,omitempty" yaml:"streams,omitempty"`
+	Kind          string          `json:"kind" yaml:"kind"`
+	SchemaVersion int             `json:"schema_version" yaml:"schema_version"`
+	Spec          json.RawMessage `json:"spec,omitempty" yaml:"-"`
 }
 
-// SLOStream is one watched release stream.
-type SLOStream struct {
-	Controller string `json:"controller" yaml:"controller"`
-	Name       string `json:"name" yaml:"name"`
+// UnmarshalYAML keeps kind and schema_version and stores every other field in Spec.
+func (w *SLOWorkspace) UnmarshalYAML(value *yaml.Node) error {
+	var raw map[string]any
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	if kind, ok := raw["kind"].(string); ok {
+		w.Kind = kind
+	}
+	switch version := raw["schema_version"].(type) {
+	case int:
+		w.SchemaVersion = version
+	case int64:
+		w.SchemaVersion = int(version)
+	case uint64:
+		w.SchemaVersion = int(version)
+	}
+	delete(raw, "kind")
+	delete(raw, "schema_version")
+	if len(raw) == 0 {
+		w.Spec = nil
+		return nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	w.Spec = encoded
+	return nil
+}
+
+// MarshalYAML writes kind, schema_version, and the spec fields.
+// A config reload round-trip has to keep those fields or validation rejects the file.
+func (w SLOWorkspace) MarshalYAML() (any, error) {
+	out := map[string]any{
+		"kind":           w.Kind,
+		"schema_version": w.SchemaVersion,
+	}
+	if len(w.Spec) == 0 {
+		return out, nil
+	}
+	var extra map[string]any
+	if err := json.Unmarshal(w.Spec, &extra); err != nil {
+		return nil, err
+	}
+	for key, value := range extra {
+		out[key] = value
+	}
+	return out, nil
 }
 
 // TeamSLOByTeam returns the SLO config for a team, or nil.
 func (c *DashboardConfig) TeamSLOByTeam(team string) *TeamSLOConfig {
-	if c == nil {
-		return nil
-	}
 	for i := range c.TeamSLOs {
 		if c.TeamSLOs[i].Team == team {
 			return &c.TeamSLOs[i]
@@ -202,9 +238,6 @@ func (c *DashboardConfig) TeamSLOByTeam(team string) *TeamSLOConfig {
 
 // Workspace returns the single workspace on this team, or nil.
 func (t *TeamSLOConfig) Workspace() *SLOWorkspace {
-	if t == nil {
-		return nil
-	}
 	for i := range t.SLOs {
 		if t.SLOs[i].Workspace != nil {
 			return t.SLOs[i].Workspace

@@ -2,17 +2,11 @@ import { Box, Card, Link, styled, Typography } from '@mui/material'
 import { useNavigate } from 'react-router'
 
 import type { Outage, SLOComponentBlock } from '../../../types'
-import { formatStatusSeverityText } from '../../../utils/helpers'
+import { formatStatusSeverityText, outageStatus, worstOutageStatus } from '../../../utils/helpers'
 import { getStatusTintStyles } from '../../../utils/styles'
 import { StatusChip } from '../../StatusColors'
 
-import {
-  openedLabel,
-  outagePath,
-  outageTintStatus,
-  sloComponentDomId,
-  worstOutageTint,
-} from './format'
+import { openedLabel, outagePath, sloComponentDomId } from './format'
 
 const Section = styled(Card)<{ status?: string }>(({ theme, status }) => ({
   ...(status ? getStatusTintStyles(theme, status, 2) : {}),
@@ -90,7 +84,7 @@ const OutageWell = ({ outage }: OutageWellProps) => {
 
   return (
     <OutageCard
-      severity={outageTintStatus(outage)}
+      severity={outageStatus(outage)}
       role="link"
       tabIndex={0}
       onClick={() => navigate(outagePath(outage))}
@@ -135,7 +129,7 @@ interface SLOComponentWellProps {
 }
 
 const SLOComponentWell = ({ block }: SLOComponentWellProps) => (
-  <Section id={sloComponentDomId(block.component)} status={worstOutageTint(block.outages)}>
+  <Section id={sloComponentDomId(block.component)} status={worstOutageStatus(block.outages)}>
     <Title>{block.component}</Title>
     {block.outages.length === 0 && <Meta>No active outages</Meta>}
     {block.outages.length > 0 && (

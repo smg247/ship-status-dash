@@ -3,18 +3,12 @@ import type { KeyboardEvent, MouseEvent } from 'react'
 import { useNavigate } from 'react-router'
 
 import type { Outage, SLOComponentBlock, SLOEvaluation, TeamSLOSummary } from '../../../types'
-import { formatStatusSeverityText } from '../../../utils/helpers'
+import { formatStatusSeverityText, outageStatus, worstOutageStatus } from '../../../utils/helpers'
 import { getStatusTintStyles } from '../../../utils/styles'
 import { StatusChip } from '../../StatusColors'
 
-import {
-  formatAge,
-  openedLabel,
-  outagePath,
-  outageTintStatus,
-  streamDomId,
-  worstOutageTint,
-} from './format'
+import { formatAge, openedLabel, outagePath, streamDomId } from './format'
+import { trtPayloadResult } from './trt/v1/result'
 
 const Section = styled(Box)(({ theme }) => ({
   marginBottom: theme.spacing(5),
@@ -137,7 +131,7 @@ const OutageSummaryWell = ({ outage }: OutageSummaryWellProps) => {
 
   return (
     <IncidentCard
-      severity={outageTintStatus(outage)}
+      severity={outageStatus(outage)}
       role="link"
       tabIndex={0}
       onClick={(event: MouseEvent) => {
@@ -168,7 +162,7 @@ interface ComponentSummaryWellProps {
 }
 
 const ComponentSummaryWell = ({ block }: ComponentSummaryWellProps) => (
-  <NestedWell status={worstOutageTint(block.outages)}>
+  <NestedWell status={worstOutageStatus(block.outages)}>
     <ComponentTitle>{block.sub_component}</ComponentTitle>
     {block.outages.length === 0 && <Meta>No active outages</Meta>}
     {block.outages.length > 0 && (
@@ -190,7 +184,8 @@ interface TeamSummaryWellProps {
 const TeamSummaryWell = ({ team, evaluation, components }: TeamSummaryWellProps) => {
   const navigate = useNavigate()
   const status = sloStatus(evaluation?.met)
-  const missedCount = evaluation?.groups.filter((group) => !group.met).length ?? 0
+  const result = trtPayloadResult(evaluation)
+  const missedCount = result ? result.groups.filter((group) => !group.met).length : 0
   const open = () => navigate(`/team/${encodeURIComponent(team)}`)
 
   return (
@@ -209,16 +204,20 @@ const TeamSummaryWell = ({ team, evaluation, components }: TeamSummaryWellProps)
             status={status}
             variant="filled"
             label={
-              evaluation.met
-                ? `All ${evaluation.groups.length} met`
-                : `${missedCount} of ${evaluation.groups.length} missed`
+              result
+                ? evaluation.met
+                  ? `All ${result.groups.length} met`
+                  : `${missedCount} of ${result.groups.length} missed`
+                : evaluation.met
+                  ? 'Met'
+                  : 'Missed'
             }
           />
         )}
       </HeaderBox>
-      {evaluation && evaluation.groups.length > 0 && (
+      {result && result.groups.length > 0 && (
         <ChipRow>
-          {evaluation.groups.map((group) => (
+          {result.groups.map((group) => (
             <StatusChip
               key={group.key}
               size="small"
@@ -254,9 +253,9 @@ interface TeamSLOSummaryWellProps {
 }
 
 const TeamSLOSummaryWell = ({ summary }: TeamSLOSummaryWellProps) => {
-  const anyEvaluation = summary.teams.some((block) => (block.evaluations?.length ?? 0) > 0)
+  const anyEvaluation = summary.teams.some((block) => block.evaluations.length > 0)
   const anyMissed = summary.teams.some((block) =>
-    block.evaluations?.some((evaluation) => !evaluation.met),
+    block.evaluations.some((evaluation) => !evaluation.met),
   )
   const outerStatus = !anyEvaluation ? 'Unknown' : anyMissed ? 'Degraded' : 'Healthy'
 
@@ -277,8 +276,8 @@ const TeamSLOSummaryWell = ({ summary }: TeamSLOSummaryWellProps) => {
           <TeamSummaryWell
             key={block.team}
             team={block.team}
-            evaluation={block.evaluations?.[0]}
-            components={block.slo_components ?? []}
+            evaluation={block.evaluations[0]}
+            components={block.slo_components}
           />
         ))}
       </Stack>

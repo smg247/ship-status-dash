@@ -2,7 +2,8 @@ import { Box, Chip, styled, Typography } from '@mui/material'
 
 import type { SLOComponentBlock, SLOEvaluation } from '../../../types'
 
-import { formatAge, worstMiss } from './format'
+import { formatAge } from './format'
+import { trtPayloadResult, worstMiss } from './trt/v1/result'
 
 const Section = styled(Box)(({ theme }) => ({
   backgroundColor: theme.palette.background.paper,
@@ -58,16 +59,20 @@ const TeamSLOStatus = ({ team, evaluations, sloComponents }: TeamSLOStatusProps)
     <Section id="slo">
       <SectionTitle>{team} SLOs</SectionTitle>
       {evaluations.map((evaluation) => {
-        const metCount = evaluation.groups.filter((group) => group.met).length
-        const miss = worstMiss(evaluation)
+        const result = trtPayloadResult(evaluation)
+        const groups = result ? result.groups : []
+        const metCount = groups.filter((group) => group.met).length
+        const miss = result ? worstMiss(result) : undefined
         return (
           <Box key={evaluation.name}>
             <Metrics>
               <Box>
                 <MetricLabel>{evaluation.display_name || evaluation.name}</MetricLabel>
-                <MetricValue>
-                  {metCount} of {evaluation.groups.length}
-                </MetricValue>
+                {result && (
+                  <MetricValue>
+                    {metCount} of {groups.length}
+                  </MetricValue>
+                )}
                 <Chip
                   size="small"
                   label={evaluation.met ? 'Met' : 'Missed'}
@@ -93,7 +98,7 @@ const TeamSLOStatus = ({ team, evaluations, sloComponents }: TeamSLOStatusProps)
               )}
             </Metrics>
             <ChipRow>
-              {evaluation.groups.map((group) => (
+              {groups.map((group) => (
                 <Chip
                   key={group.key}
                   size="small"

@@ -174,8 +174,6 @@ if [ "$USE_EXISTING_POSTGRES" = true ]; then
 else
   DSN="postgres://$DB_USER:$DB_PASSWORD@localhost:$DB_PORT/$DB_NAME?sslmode=disable&client_encoding=UTF8"
 fi
-export TEST_DATABASE_DSN="$DSN"
-
 echo "Running migration..."
 PROJECT_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$PROJECT_ROOT"

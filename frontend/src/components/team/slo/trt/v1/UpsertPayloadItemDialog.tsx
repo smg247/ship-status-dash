@@ -100,7 +100,7 @@ const newJobDraft = (partial?: Partial<JobDraft>): JobDraft => {
 const emptyLink = (): LinkDraft => ({ url: '', link_type: 'jira' })
 
 const initialLinks = (item?: SLOItem): LinkDraft[] => {
-  const existing = (item?.links ?? []).map((link) => ({
+  const existing = (item ? item.links : []).map((link) => ({
     id: link.ID,
     url: link.url,
     link_type: link.link_type,
@@ -129,7 +129,7 @@ const UpsertPayloadItemDialog = ({
   const [analysisURL, setAnalysisURL] = useState(item?.details.analysis_url ?? '')
   const [notes, setNotes] = useState(item?.notes ?? '')
   const [jobs, setJobs] = useState<JobDraft[]>(
-    (item?.details.jobs ?? []).map((job) => newJobDraft(job)),
+    (item ? item.details.jobs : []).map((job) => newJobDraft(job)),
   )
   const [links, setLinks] = useState<LinkDraft[]>(initialLinks(item))
   const [error, setError] = useState('')
@@ -149,7 +149,7 @@ const UpsertPayloadItemDialog = ({
   }
 
   const syncLinks = async (saved: SLOItem) => {
-    const original = item?.links ?? []
+    const original = item ? item.links : []
     const desired = links
       .map((link) => ({ ...link, url: link.url.trim() }))
       .filter((link) => link.url !== '')

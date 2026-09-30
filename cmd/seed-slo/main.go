@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"ship-status-dash/pkg/repositories"
+	"ship-status-dash/pkg/slo"
 	"ship-status-dash/pkg/slo/seed"
 	"ship-status-dash/pkg/types"
 )
@@ -33,10 +34,6 @@ func main() {
 	if err != nil {
 		log.WithField("error", err).Fatal("Failed to load config")
 	}
-	team, ws, err := seed.PayloadWorkspace(cfg)
-	if err != nil {
-		log.WithField("error", err).Fatal("Failed to find payload workspace")
-	}
 
 	db, err := gorm.Open(postgres.Open(*dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
@@ -53,15 +50,11 @@ func main() {
 		log.WithField("error", err).Fatal("Failed to set client encoding")
 	}
 
-	component, sub, err := seed.SLOComponent(cfg, team)
-	if err != nil {
-		log.WithField("error", err).Fatal("Failed to find SLO component")
-	}
 	repo := repositories.NewGORMSLOWorkspaceRepository(db)
-	if err := seed.ReplacePayloads(db, repo, team, ws, component, sub); err != nil {
-		log.WithField("error", err).Fatal("Failed to seed SLO payloads")
+	if err := seed.Apply(db, repo, cfg); err != nil {
+		log.WithField("error", err).Fatal("Failed to seed SLO workspace")
 	}
-	fmt.Printf("\n✓ Seeded %s SLO payloads for %d streams\n", team, len(ws.Streams))
+	fmt.Printf("\n✓ Seeded SLO workspace rows\n")
 }
 
 func loadConfig(path string) (*types.DashboardConfig, error) {
@@ -73,9 +66,9 @@ func loadConfig(path string) (*types.DashboardConfig, error) {
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, err
 	}
-	if err := cfg.ValidateTeamSLOs(); err != nil {
+	cfg.AssignSlugs()
+	if err := cfg.ValidateTeamSLOs(slo.KnownWorkspace, slo.ValidateSettings); err != nil {
 		return nil, err
 	}
-	cfg.NormalizeTeamSLOs()
 	return &cfg, nil
 }

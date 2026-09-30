@@ -36,8 +36,4 @@ For detailed documentation, see [`cmd/component-monitor/README.md`](cmd/componen
 
 ## Configuration
 
-The dashboard reads component definitions and settings from a YAML config file (synced from openshift/release via git-sync in production). This includes component owners, monitoring config, and `trusted_delegators` for delegated write authorization. Set `exclude_from_main_outage_well: true` on a sub-component to keep it out of the home-page In Outage well and the ship-logo fire indicator. Set `slo_component: true` on a component to hide it from the home and team grids. List that component's slug in `team_slos[].slo_components` to show its active outages in that team's SLO wells. Config load rejects a slug that is missing or not marked `slo_component`, and a marked component that is not listed. `team_slos` defines per-team objectives, owners, and at most one workspace. See [API_ENDPOINTS.md](API_ENDPOINTS.md) for endpoint details.
-
-`cmd/seed-slo` loads sample payload workspace rows for local dev and e2e. `--dsn` is required. `--config` is the dashboard YAML (default `hack/local/dashboard/config.yaml`) and supplies the team and stream names. `hack/local/dashboard/local-dev.sh` runs it after migrate.
-
-The dashboard deletes TRT payload rows that fall outside retention on `--trt-payload-prune-interval` (default 5m). SLO read endpoints do not delete those rows.
+The dashboard reads component definitions and settings from a YAML config file (synced from openshift/release via git-sync in production). This includes component owners, monitoring config, and `trusted_delegators` for delegated write authorization. Set `exclude_from_main_outage_well: true` on a sub-component to keep it out of the home-page In Outage well and the ship-logo fire indicator. `team_slos` defines per-team SLO objectives. See [API_ENDPOINTS.md](API_ENDPOINTS.md) for endpoint details.

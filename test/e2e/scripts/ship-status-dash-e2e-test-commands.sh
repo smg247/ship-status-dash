@@ -71,13 +71,6 @@ echo "Prometheus HTTP status code: ${PROMETHEUS_HTTP_STATUS}"
 
 export TEST_PROMETHEUS_URL="http://localhost:${PROMETHEUS_PORT}"
 
-# Local port is not 5432, so a developer Postgres on the runner does not collide.
-echo "Setting up port forwarding to Postgres..."
-${KUBECTL_CMD} -n ${E2E_NS} port-forward svc/postgres 15432:5432 > /dev/null 2>&1 &
-POSTGRES_PORT_FORWARD_PID=$!
-sleep 2
-export TEST_DATABASE_DSN="postgres://postgres:testpass@127.0.0.1:15432/ship_status_test?sslmode=disable"
-
 set +e
 go test ./test/e2e/... -count 1 -p 1 -timeout 20m
 TEST_EXIT_CODE=$?
@@ -120,10 +113,6 @@ fi
 if [ ! -z "${PROMETHEUS_PORT_FORWARD_PID:-}" ]; then
   echo "Cleaning up Prometheus port forwarding..."
   kill $PROMETHEUS_PORT_FORWARD_PID 2>/dev/null || true
-fi
-if [ ! -z "${POSTGRES_PORT_FORWARD_PID:-}" ]; then
-  echo "Cleaning up Postgres port forwarding..."
-  kill $POSTGRES_PORT_FORWARD_PID 2>/dev/null || true
 fi
 
 # Cleanup: Delete the test namespace

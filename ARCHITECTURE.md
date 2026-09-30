@@ -186,14 +186,14 @@ Production components are usually owned via `owners.rover_group` in [`dashboard-
 
 The optional `owners.user` field is intended for local/testing overrides (see [`Owner` in `pkg/types/config.go`](pkg/types/config.go)); it uses the same exact match against `X-Forwarded-User`.
 
-Team SLO workspace writes use the same owner fields and the same exact match, through [`IsUserAuthorizedForTeamSLO`](cmd/dashboard/slo_handlers.go) on that team's `team_slos[].owners`. Component owners do not grant team SLO write access.
+Team SLO workspace writes use the same owner fields and the same exact match, through [`IsUserAuthorizedForTeamSLO`](cmd/dashboard/handlers.go) on that team's `team_slos[].owners`. Component owners do not grant team SLO write access.
 
 **Where the username is used**
 
 | Use | Location | Behavior |
 |-----|----------|----------|
 | Gate mutating API calls | [`IsUserAuthorizedForComponent`](cmd/dashboard/handlers.go) | Required for POST/PATCH/DELETE on outages; returns 403 if the user is not in any owner `user`, `service_account`, or `rover_group` for that component |
-| Gate team SLO writes | [`IsUserAuthorizedForTeamSLO`](cmd/dashboard/slo_handlers.go) | Required for PUT/DELETE on `/api/teams/{team}/slo/items` and links; returns 403 unless the user is on that team's `team_slos` owners |
+| Gate team SLO writes | [`IsUserAuthorizedForTeamSLO`](cmd/dashboard/handlers.go) | Required for PUT/DELETE on `/api/teams/{team}/slo/items` and links; returns 403 unless the user is on that team's `team_slos` owners |
 | Session / admin scope | `GET /api/user` | Returns `username`, `components` (slugs the user may administer), and `team_slos` (team names whose workspace the user may edit) ([`GetAuthenticatedUserJSON`](cmd/dashboard/handlers.go)) |
 | Outage attribution | `outages.created_by` | Set to the active user on manual create ([`CreateOutageJSON`](cmd/dashboard/handlers.go)); shown in the UI and audit history |
 | Audit trail | `outage_audit_logs.user` | Recorded on create, update, and delete via GORM hooks using `CurrentUserKey` from the repository ([`pkg/types/models.go`](pkg/types/models.go)) |

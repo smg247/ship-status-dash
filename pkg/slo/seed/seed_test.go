@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"ship-status-dash/pkg/slo"
+	payloadv1 "ship-status-dash/pkg/slo/payloadstreams/v1"
 	"ship-status-dash/pkg/types"
 )
 
@@ -30,52 +31,87 @@ func TestSLOComponentUsesListedSlug(t *testing.T) {
 			SLOComponents: []string{"trt-incidents"},
 		}},
 	}
-	component, sub, err := SLOComponent(cfg, "TRT")
-	require.NoError(t, err)
-	assert.Equal(t, "trt-incidents", component)
-	assert.Equal(t, "incidents", sub)
+	cfg.AssignSlugs()
 
-	_, _, err = SLOComponent(cfg, "Nope")
-	require.Error(t, err)
+	tests := []struct {
+		team    string
+		want    string
+		wantSub string
+		wantErr bool
+	}{
+		{team: "TRT", want: "trt-incidents", wantSub: "incidents"},
+		{team: "Nope", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.team, func(t *testing.T) {
+			component, sub, err := SLOComponent(cfg, tt.team)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, component)
+			assert.Equal(t, tt.wantSub, sub)
+		})
+	}
 }
 
-func TestPayloadWorkspaceUsesConfig(t *testing.T) {
+func TestTRTPayloadSettingsUsesConfig(t *testing.T) {
+	raw, err := json.Marshal(payloadv1.Settings{
+		Window: "24h", MinAccepted: 1, RecentPayloads: 2,
+		Streams: []payloadv1.Stream{{ReleaseController: "arm64", Name: "renamed-nightly"}},
+	})
+	require.NoError(t, err)
 	cfg := &types.DashboardConfig{
 		TeamSLOs: []types.TeamSLOConfig{{
 			Team: "Widget",
 			SLOs: []types.NamedSLO{{
 				Name:   "payloads",
-				Source: slo.SourcePayloadAcceptance,
+				Source: payloadv1.Source,
 				Workspace: &types.SLOWorkspace{
-					Kind:          slo.KindPayloadStreams,
-					SchemaVersion: slo.SchemaVersionV1,
-					Streams:       []types.SLOStream{{Controller: "arm64", Name: "renamed-nightly"}},
+					Kind:          payloadv1.Kind,
+					SchemaVersion: payloadv1.SchemaVersion,
+					Spec:          raw,
 				},
 			}},
 		}},
 	}
-	team, ws, err := PayloadWorkspace(cfg)
+	team, settings, err := TRTPayloadSettings(cfg)
 	require.NoError(t, err)
 	assert.Equal(t, "Widget", team)
-	require.Len(t, ws.Streams, 1)
-	assert.Equal(t, "renamed-nightly", ws.Streams[0].Name)
+	require.Len(t, settings.Streams, 1)
+	assert.Equal(t, "renamed-nightly", settings.Streams[0].Name)
+	assert.Equal(t, "arm64", settings.Streams[0].ReleaseController)
 }
 
-func TestRoleAtMatchesE2EStreamCount(t *testing.T) {
-	assert.Equal(t, RoleRecentReject, RoleAt(2, 0))
-	assert.Equal(t, RoleMiss, RoleAt(2, 1))
+func TestRoleAt(t *testing.T) {
+	tests := []struct {
+		n        int
+		index    int
+		wantRole string
+		wantMiss int
+	}{
+		{n: 2, index: 0, wantRole: RoleRecentReject, wantMiss: 1},
+		{n: 2, index: 1, wantRole: RoleMiss, wantMiss: 1},
+		{n: 4, index: 2, wantRole: RoleMiss, wantMiss: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.wantRole, func(t *testing.T) {
+			assert.Equal(t, tt.wantRole, RoleAt(tt.n, tt.index))
+			assert.Equal(t, tt.wantMiss, MissIndex(tt.n))
+		})
+	}
 	assert.Equal(t, []int{0, 1}, JiraStreamIndexes(2))
-	assert.Equal(t, 1, MissIndex(2))
 }
 
 func TestBuildSeed(t *testing.T) {
 	now := time.Date(2026, 9, 29, 16, 0, 0, 0, time.UTC)
-	streams := []types.SLOStream{
-		{Controller: "amd64", Name: "5.1.0-0.nightly"},
-		{Controller: "amd64", Name: "5.1.0-0.ci"},
-		{Controller: "amd64", Name: "5.0.0-0.nightly"},
-		{Controller: "amd64", Name: "5.0.0-0.ci"},
-		{Controller: "arm64", Name: "renamed-0.nightly"},
+	streams := []payloadv1.Stream{
+		{ReleaseController: "amd64", Name: "5.1.0-0.nightly"},
+		{ReleaseController: "amd64", Name: "5.1.0-0.ci"},
+		{ReleaseController: "amd64", Name: "5.0.0-0.nightly"},
+		{ReleaseController: "amd64", Name: "5.0.0-0.ci"},
+		{ReleaseController: "arm64", Name: "renamed-0.nightly"},
 	}
 
 	seeded, err := buildSeed(now, "Widget", streams, 5)
@@ -90,12 +126,12 @@ func TestBuildSeed(t *testing.T) {
 	for _, row := range seeded {
 		item := row.item
 		assert.Equal(t, "Widget", item.Team)
-		assert.Equal(t, slo.KindPayloadStreams, item.Kind)
-		assert.Equal(t, slo.SchemaVersionV1, item.SchemaVersion)
+		assert.Equal(t, payloadv1.Kind, item.Kind)
+		assert.Equal(t, payloadv1.SchemaVersion, item.SchemaVersion)
 		assert.Equal(t, UpdatedBy, item.UpdatedBy)
 		assert.False(t, seenKey[item.ItemKey])
 		seenKey[item.ItemKey] = true
-		require.NoError(t, slo.ValidateDetails(item.Kind, item.SchemaVersion, item.Details))
+		require.NoError(t, payloadv1.ValidateDetails(item.Details))
 		if item.ItemKey == PruneCandidateItemKey {
 			assert.Equal(t, streams[0].Name, item.GroupKey)
 			assert.Equal(t, "Rejected", item.Outcome)
@@ -123,24 +159,29 @@ func TestBuildSeed(t *testing.T) {
 	assert.Equal(t, 1, outageLinks)
 	assertConsistentStreaks(t, items)
 
+	spec, err := json.Marshal(payloadv1.Settings{Window: "24h", MinAccepted: 1, RecentPayloads: 5, Streams: streams})
+	require.NoError(t, err)
 	team := &types.TeamSLOConfig{
 		Team: "Widget",
 		SLOs: []types.NamedSLO{{
 			Name:   "accepted-payload-per-day",
-			Source: slo.SourcePayloadAcceptance,
+			Source: payloadv1.Source,
 			Workspace: &types.SLOWorkspace{
-				Kind:          slo.KindPayloadStreams,
-				SchemaVersion: slo.SchemaVersionV1,
-				Streams:       streams,
+				Kind:          payloadv1.Kind,
+				SchemaVersion: payloadv1.SchemaVersion,
+				Spec:          spec,
 			},
 		}},
 	}
-	got := slo.Evaluate(now, team, items)
+	got, err := slo.Evaluate(now, team, items)
+	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.False(t, got[0].Met)
+	var result payloadv1.Result
+	require.NoError(t, json.Unmarshal(got[0].Result, &result))
 
-	byStream := map[string]slo.GroupEval{}
-	for _, group := range got[0].Groups {
+	byStream := map[string]payloadv1.GroupEval{}
+	for _, group := range result.Groups {
 		byStream[group.Key] = group
 	}
 	assert.True(t, byStream[streams[0].Name].Met)
@@ -158,10 +199,6 @@ func TestBuildSeed(t *testing.T) {
 	assert.True(t, byStream[streams[1].Name].LastAcceptedAt.Equal(now.Add(-4*time.Hour)))
 	assert.True(t, byStream[streams[3].Name].LastAcceptedAt.Equal(now.Add(-8*time.Hour)))
 
-	names := make([]string, len(streams))
-	for i, stream := range streams {
-		names[i] = stream.Name
-	}
 	for i := range items {
 		items[i].ID = uint(i + 1)
 	}
@@ -172,10 +209,11 @@ func TestBuildSeed(t *testing.T) {
 		}
 	}
 	require.NotZero(t, candidateID)
-	assert.Contains(t, slo.TRTPayloadPruneIDs(now, names, 5, items), candidateID)
-	assert.NotContains(t, itemKeysOf(slo.TRTPayloadDisplayItems(names, 5, items)), PruneCandidateItemKey)
+	settings := payloadv1.Settings{Window: "24h", MinAccepted: 1, RecentPayloads: 5, Streams: streams}
+	assert.Contains(t, payloadv1.PruneIDs(now, settings, items), candidateID)
+	assert.NotContains(t, itemKeysOf(payloadv1.DisplayItems(settings, items)), PruneCandidateItemKey)
 	// Twelve hours later the candidate is still a day outside the window.
-	assert.Contains(t, slo.TRTPayloadPruneIDs(now.Add(12*time.Hour), names, 5, items), candidateID)
+	assert.Contains(t, payloadv1.PruneIDs(now.Add(12*time.Hour), settings, items), candidateID)
 }
 
 func itemKeysOf(items []types.SLOWorkspaceItem) []string {
@@ -218,14 +256,14 @@ func assertConsistentStreaks(t *testing.T, items []types.SLOWorkspaceItem) {
 	}
 }
 
-func jobsOf(t *testing.T, item types.SLOWorkspaceItem) []slo.PayloadJobV1 {
+func jobsOf(t *testing.T, item types.SLOWorkspaceItem) []payloadv1.PayloadJob {
 	t.Helper()
-	var doc slo.PayloadDetailsV1
+	var doc payloadv1.PayloadDetails
 	require.NoError(t, json.Unmarshal(item.Details, &doc))
 	return doc.Jobs
 }
 
-func failedJobNamed(jobs []slo.PayloadJobV1, name string) bool {
+func failedJobNamed(jobs []payloadv1.PayloadJob, name string) bool {
 	for _, job := range jobs {
 		if job.Name == name && job.State == "failure" {
 			return true

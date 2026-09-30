@@ -5,13 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
 	"ship-status-dash/pkg/repositories"
-	"ship-status-dash/pkg/slo"
+	payloadv1 "ship-status-dash/pkg/slo/payloadstreams/v1"
 	"ship-status-dash/pkg/types"
 )
 
@@ -49,7 +48,7 @@ var metAcceptAgo = []time.Duration{4 * time.Hour, 8 * time.Hour, 6 * time.Hour}
 type payloadSpec struct {
 	ago      time.Duration
 	outcome  string
-	jobs     []slo.PayloadJobV1
+	jobs     []payloadv1.PayloadJob
 	analysis bool
 }
 
@@ -58,31 +57,59 @@ type seededItem struct {
 	links []types.SLOWorkspaceLink
 }
 
-// PayloadWorkspace returns the team and workspace named in config.
-func PayloadWorkspace(cfg *types.DashboardConfig) (string, *types.SLOWorkspace, error) {
-	if cfg == nil {
-		return "", nil, fmt.Errorf("config is required")
-	}
+// Apply writes sample rows for each workspace this binary knows how to seed.
+func Apply(db *gorm.DB, repo repositories.SLOWorkspaceRepository, cfg *types.DashboardConfig) error {
+	seeded := false
 	for i := range cfg.TeamSLOs {
-		team := &cfg.TeamSLOs[i]
-		ws := team.Workspace()
-		if ws == nil || ws.Kind != slo.KindPayloadStreams || ws.SchemaVersion != slo.SchemaVersionV1 {
+		sloCfg := &cfg.TeamSLOs[i]
+		ws := sloCfg.Workspace()
+		if ws == nil {
 			continue
 		}
-		if len(ws.Streams) == 0 {
-			return "", nil, fmt.Errorf("team %s payload workspace has no streams", team.Team)
+		switch {
+		case ws.Kind == payloadv1.Kind && ws.SchemaVersion == payloadv1.SchemaVersion:
+			settings, err := payloadv1.ParseSettings(ws.Spec)
+			if err != nil {
+				return fmt.Errorf("team %s: %w", sloCfg.Team, err)
+			}
+			component, sub, err := SLOComponent(cfg, sloCfg.Team)
+			if err != nil {
+				return err
+			}
+			if err := SeedTRTPayloadStreams(db, repo, sloCfg.Team, settings, component, sub); err != nil {
+				return err
+			}
+			seeded = true
+		default:
+			return fmt.Errorf("no seeder for workspace %s v%d", ws.Kind, ws.SchemaVersion)
 		}
-		return team.Team, ws, nil
 	}
-	return "", nil, fmt.Errorf("no payload_streams v1 workspace in config")
+	if !seeded {
+		return fmt.Errorf("no workspace in config")
+	}
+	return nil
+}
+
+// TRTPayloadSettings returns the team and payload_streams v1 settings named in config.
+func TRTPayloadSettings(cfg *types.DashboardConfig) (string, payloadv1.Settings, error) {
+	for i := range cfg.TeamSLOs {
+		sloCfg := &cfg.TeamSLOs[i]
+		ws := sloCfg.Workspace()
+		if ws == nil || ws.Kind != payloadv1.Kind || ws.SchemaVersion != payloadv1.SchemaVersion {
+			continue
+		}
+		settings, err := payloadv1.ParseSettings(ws.Spec)
+		if err != nil {
+			return "", payloadv1.Settings{}, fmt.Errorf("team %s: %w", sloCfg.Team, err)
+		}
+		return sloCfg.Team, settings, nil
+	}
+	return "", payloadv1.Settings{}, fmt.Errorf("no payload_streams v1 workspace in config")
 }
 
 // buildSeed returns the payload rows for the configured streams.
-func buildSeed(now time.Time, team string, streams []types.SLOStream, recent int) ([]seededItem, error) {
+func buildSeed(now time.Time, team string, streams []payloadv1.Stream, recent int) ([]seededItem, error) {
 	now = now.UTC()
-	if recent <= 0 {
-		recent = 5
-	}
 	metN := 0
 	var out []seededItem
 	for i, stream := range streams {
@@ -131,10 +158,10 @@ func recentRejectSpecs(n int) []payloadSpec {
 	upgrade := failedJob(upgradeJob, "Same disruption as TRT-4120. Not infra.")
 	metal := failedJob(metalJob, "Likely flake. Watching next payload.")
 	specs := []payloadSpec{
-		{ago: 2 * time.Hour, outcome: "Rejected", jobs: []slo.PayloadJobV1{upgrade, metal}, analysis: true},
+		{ago: 2 * time.Hour, outcome: "Rejected", jobs: []payloadv1.PayloadJob{upgrade, metal}, analysis: true},
 		{ago: 6 * time.Hour, outcome: "Accepted"},
-		{ago: 12 * time.Hour, outcome: "Rejected", jobs: []slo.PayloadJobV1{upgrade}, analysis: true},
-		{ago: 16 * time.Hour, outcome: "Rejected", jobs: []slo.PayloadJobV1{metal}, analysis: true},
+		{ago: 12 * time.Hour, outcome: "Rejected", jobs: []payloadv1.PayloadJob{upgrade}, analysis: true},
+		{ago: 16 * time.Hour, outcome: "Rejected", jobs: []payloadv1.PayloadJob{metal}, analysis: true},
 		{ago: 20 * time.Hour, outcome: "Accepted"},
 	}
 	return applyStreaks(fitSpecs(specs, n, 2))
@@ -145,10 +172,10 @@ func metSpecs(n int, acceptAgo time.Duration) []payloadSpec {
 	metal := failedJob(metalJob, "Likely flake. Watching next payload.")
 	specs := []payloadSpec{
 		{ago: acceptAgo, outcome: "Accepted"},
-		{ago: acceptAgo + 6*time.Hour, outcome: "Rejected", jobs: []slo.PayloadJobV1{upgrade, metal}, analysis: true},
-		{ago: acceptAgo + 10*time.Hour, outcome: "Rejected", jobs: []slo.PayloadJobV1{upgrade}, analysis: true},
+		{ago: acceptAgo + 6*time.Hour, outcome: "Rejected", jobs: []payloadv1.PayloadJob{upgrade, metal}, analysis: true},
+		{ago: acceptAgo + 10*time.Hour, outcome: "Rejected", jobs: []payloadv1.PayloadJob{upgrade}, analysis: true},
 		{ago: acceptAgo + 14*time.Hour, outcome: "Accepted"},
-		{ago: acceptAgo + 16*time.Hour, outcome: "Rejected", jobs: []slo.PayloadJobV1{metal}, analysis: true},
+		{ago: acceptAgo + 16*time.Hour, outcome: "Rejected", jobs: []payloadv1.PayloadJob{metal}, analysis: true},
 	}
 	return applyStreaks(fitSpecs(specs, n, 1))
 }
@@ -160,10 +187,10 @@ func missSpecs(n int) []payloadSpec {
 	upgrade := failedJob(upgradeJob, "Backport candidate. Waiting on 5.1 fix.")
 	metal := failedJob(metalJob, "Likely flake. Watching next payload.")
 	rejects := []payloadSpec{
-		{ago: 3 * time.Hour, outcome: "Rejected", jobs: []slo.PayloadJobV1{upgrade}, analysis: true},
-		{ago: 9 * time.Hour, outcome: "Rejected", jobs: []slo.PayloadJobV1{upgrade}, analysis: true},
+		{ago: 3 * time.Hour, outcome: "Rejected", jobs: []payloadv1.PayloadJob{upgrade}, analysis: true},
+		{ago: 9 * time.Hour, outcome: "Rejected", jobs: []payloadv1.PayloadJob{upgrade}, analysis: true},
 		{ago: 15 * time.Hour, outcome: "Rejected"},
-		{ago: 21 * time.Hour, outcome: "Rejected", jobs: []slo.PayloadJobV1{metal}, analysis: true},
+		{ago: 21 * time.Hour, outcome: "Rejected", jobs: []payloadv1.PayloadJob{metal}, analysis: true},
 	}
 	for len(rejects) < n-1 {
 		rejects = append(rejects, payloadSpec{
@@ -194,20 +221,16 @@ func fitSpecs(specs []payloadSpec, n, keep int) []payloadSpec {
 	return specs[:n]
 }
 
-func itemFor(now time.Time, team string, stream types.SLOStream, spec payloadSpec) (types.SLOWorkspaceItem, error) {
+func itemFor(now time.Time, team string, stream payloadv1.Stream, spec payloadSpec) (types.SLOWorkspaceItem, error) {
 	occurred := now.Add(-spec.ago).UTC()
 	name := stream.Name
 	tag := name + "-" + occurred.Format("2006-01-02-150405")
 	jobs := spec.jobs
 	if jobs == nil {
-		jobs = []slo.PayloadJobV1{}
+		jobs = []payloadv1.PayloadJob{}
 	}
-	controller := strings.TrimSpace(stream.Controller)
-	if controller == "" {
-		controller = "amd64"
-	}
-	doc := slo.PayloadDetailsV1{
-		PayloadURL: fmt.Sprintf("https://%s.ocp.releases.ci.openshift.org/releasestream/%s/release/%s", controller, name, tag),
+	doc := payloadv1.PayloadDetails{
+		PayloadURL: fmt.Sprintf("https://%s.ocp.releases.ci.openshift.org/releasestream/%s/release/%s", stream.ReleaseController, name, tag),
 		Jobs:       jobs,
 	}
 	if spec.analysis {
@@ -217,13 +240,13 @@ func itemFor(now time.Time, team string, stream types.SLOStream, spec payloadSpe
 	if err != nil {
 		return types.SLOWorkspaceItem{}, err
 	}
-	if err := slo.ValidateDetails(slo.KindPayloadStreams, slo.SchemaVersionV1, details); err != nil {
+	if err := doc.Validate(); err != nil {
 		return types.SLOWorkspaceItem{}, fmt.Errorf("seed %s: %w", tag, err)
 	}
 	return types.SLOWorkspaceItem{
 		Team:          team,
-		Kind:          slo.KindPayloadStreams,
-		SchemaVersion: slo.SchemaVersionV1,
+		Kind:          payloadv1.Kind,
+		SchemaVersion: payloadv1.SchemaVersion,
 		ItemKey:       tag,
 		GroupKey:      name,
 		OccurredAt:    occurred,
@@ -260,7 +283,7 @@ func JiraStreamIndexes(streamCount int) []int {
 
 // attachSampleLinks adds a Jira link to the newest rejected payload on the first
 // stream and on the miss stream, and an outage link on the first of those.
-func attachSampleLinks(seeded []seededItem, streams []types.SLOStream, outageURL string, outageID uint) {
+func attachSampleLinks(seeded []seededItem, streams []payloadv1.Stream, outageURL string, outageID uint) {
 	for n, streamIdx := range JiraStreamIndexes(len(streams)) {
 		if streamIdx >= len(streams) {
 			continue
@@ -300,9 +323,6 @@ func newestRejected(seeded []seededItem, stream string) int {
 
 // SLOComponent returns the slug pair for the team's first listed slo_component.
 func SLOComponent(cfg *types.DashboardConfig, team string) (string, string, error) {
-	if cfg == nil {
-		return "", "", fmt.Errorf("config is required")
-	}
 	teamCfg := cfg.TeamSLOByTeam(team)
 	if teamCfg == nil || len(teamCfg.SLOComponents) == 0 {
 		return "", "", fmt.Errorf("team %s has no slo component", team)
@@ -311,18 +331,18 @@ func SLOComponent(cfg *types.DashboardConfig, team string) (string, string, erro
 	if component == nil || !component.SLOComponent || len(component.Subcomponents) == 0 {
 		return "", "", fmt.Errorf("team %s slo component %s is missing", team, teamCfg.SLOComponents[0])
 	}
-	return component.EffectiveSlug(), component.Subcomponents[0].EffectiveSlug(), nil
+	return component.Slug, component.Subcomponents[0].Slug, nil
 }
 
-// ReplacePayloads deletes existing payload rows for the team and writes a fresh seed.
-func ReplacePayloads(db *gorm.DB, repo repositories.SLOWorkspaceRepository, team string, ws *types.SLOWorkspace, component, sub string) error {
+// SeedTRTPayloadStreams deletes existing payload rows for the team and writes a fresh seed.
+func SeedTRTPayloadStreams(db *gorm.DB, repo repositories.SLOWorkspaceRepository, team string, settings payloadv1.Settings, component, sub string) error {
 	existing, err := repo.ListByTeam(team)
 	if err != nil {
 		return err
 	}
 	var drop []uint
 	for _, item := range existing {
-		if item.Kind == slo.KindPayloadStreams {
+		if item.Kind == payloadv1.Kind {
 			drop = append(drop, item.ID)
 		}
 	}
@@ -335,11 +355,11 @@ func ReplacePayloads(db *gorm.DB, repo repositories.SLOWorkspaceRepository, team
 	if err != nil {
 		return err
 	}
-	seeded, err := buildSeed(now, team, ws.Streams, ws.RecentPayloads)
+	seeded, err := buildSeed(now, team, settings.Streams, settings.RecentPayloads)
 	if err != nil {
 		return err
 	}
-	attachSampleLinks(seeded, ws.Streams, outageURL, outageID)
+	attachSampleLinks(seeded, settings.Streams, outageURL, outageID)
 	for i := range seeded {
 		stored, err := repo.UpsertItem(&seeded[i].item)
 		if err != nil {
@@ -438,8 +458,8 @@ func jobFailed(spec payloadSpec, name string) bool {
 	return false
 }
 
-func failedJob(name, notes string) slo.PayloadJobV1 {
-	return slo.PayloadJobV1{
+func failedJob(name, notes string) payloadv1.PayloadJob {
+	return payloadv1.PayloadJob{
 		Name:  name,
 		URL:   "https://prow.ci.openshift.org/view/gs/test-platform-results-public/logs/" + name,
 		State: "failure",

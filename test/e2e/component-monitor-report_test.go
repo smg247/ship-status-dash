@@ -732,10 +732,10 @@ func jiraOutageByCheck(outages []types.Outage, check string) *types.Outage {
 
 func testComponentMonitorPerReasonReport(client *TestHTTPClient) func(*testing.T) {
 	return func(t *testing.T) {
-		cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub)
+		cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub, "app-ci-component-monitor")
 
 		t.Run("two Jira reasons create two active outages with summaries and links", func(t *testing.T) {
-			cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub)
+			cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub, "app-ci-component-monitor")
 			postTRTIncidentReport(t, client, types.StatusDegraded, []types.Reason{
 				jiraReportReason("TRT-1", "First incident", true),
 				jiraReportReason("TRT-2", "Second incident", true),
@@ -769,7 +769,7 @@ func testComponentMonitorPerReasonReport(client *TestHTTPClient) func(*testing.T
 		})
 
 		t.Run("second report with only TRT-2 auto-resolves TRT-1", func(t *testing.T) {
-			cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub)
+			cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub, "app-ci-component-monitor")
 			postTRTIncidentReport(t, client, types.StatusDegraded, []types.Reason{
 				jiraReportReason("TRT-1", "First incident", true),
 				jiraReportReason("TRT-2", "Second incident", true),
@@ -800,7 +800,7 @@ func testComponentMonitorPerReasonReport(client *TestHTTPClient) func(*testing.T
 		})
 
 		t.Run("empty healthy reasons auto-resolve remaining outage", func(t *testing.T) {
-			cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub)
+			cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub, "app-ci-component-monitor")
 			postTRTIncidentReport(t, client, types.StatusDegraded, []types.Reason{
 				jiraReportReason("TRT-2", "Second incident", true),
 			})
@@ -820,7 +820,7 @@ func testComponentMonitorPerReasonReport(client *TestHTTPClient) func(*testing.T
 		})
 
 		t.Run("reporting the same two keys again does not duplicate", func(t *testing.T) {
-			cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub)
+			cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub, "app-ci-component-monitor")
 			reasons := []types.Reason{
 				jiraReportReason("TRT-1", "First incident", true),
 				jiraReportReason("TRT-2", "Second incident", true),
@@ -840,7 +840,7 @@ func testComponentMonitorPerReasonReport(client *TestHTTPClient) func(*testing.T
 		})
 
 		t.Run("reporting links later backfills an existing outage", func(t *testing.T) {
-			cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub)
+			cleanupOutages(t, client, trtIncidentsComponent, trtIncidentsSub, "app-ci-component-monitor")
 			postTRTIncidentReport(t, client, types.StatusDegraded, []types.Reason{
 				jiraReportReason("TRT-1", "First incident", false),
 			})

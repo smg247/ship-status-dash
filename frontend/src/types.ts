@@ -169,33 +169,18 @@ export interface Component {
   last_ping_time?: string
 }
 
-export interface SLOStream {
-  controller: string
-  name: string
-}
-
 export interface SLOWorkspace {
   kind: string
   schema_version: number
-  recent_payloads?: number
-  streams?: SLOStream[]
-}
-
-export interface SLOGroupEval {
-  key: string
-  accepted: number
-  met: boolean
-  last_accepted_at?: string
+  spec?: unknown
 }
 
 export interface SLOEvaluation {
   name: string
   display_name: string
   source: string
-  window: string
-  target: { min_accepted: number }
   met: boolean
-  groups: SLOGroupEval[]
+  result?: unknown
 }
 
 export interface SLOJob {
@@ -209,7 +194,7 @@ export interface SLOJob {
 export interface SLOPayloadDetails {
   payload_url?: string
   analysis_url?: string
-  jobs?: SLOJob[]
+  jobs: SLOJob[]
 }
 
 export interface SLOItemLink {
@@ -245,14 +230,13 @@ export interface TeamSLO {
   evaluations: SLOEvaluation[]
   slo_components: SLOComponentBlock[]
   items: SLOItem[]
-  item_keys: string[]
 }
 
 export interface TeamSLOSummary {
   teams: Array<{
     team: string
-    evaluations?: SLOEvaluation[]
-    slo_components?: SLOComponentBlock[]
+    evaluations: SLOEvaluation[]
+    slo_components: SLOComponentBlock[]
   }>
 }
 

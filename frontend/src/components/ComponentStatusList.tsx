@@ -96,7 +96,7 @@ const ComponentStatusList: React.FC = () => {
     }
   }, [])
 
-  const fetchComponents = useCallback((silent: boolean) => {
+  const loadHomeStatus = useCallback((silent: boolean) => {
     fetch(getTeamSLOSummaryEndpoint())
       .then((res) => (res.ok ? res.json() : null))
       .then((data: TeamSLOSummary | null) => setSloSummary(data))
@@ -143,14 +143,14 @@ const ComponentStatusList: React.FC = () => {
 
   useEffect(() => {
     const cancel = deferMountFetch(() => {
-      fetchComponents(false)
+      loadHomeStatus(false)
     })
     return () => {
       cancel()
     }
-  }, [fetchComponents])
+  }, [loadHomeStatus])
 
-  useIntervalRefresh(() => fetchComponents(true))
+  useIntervalRefresh(() => loadHomeStatus(true))
 
   if (loading) {
     return (

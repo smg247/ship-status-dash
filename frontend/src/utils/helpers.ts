@@ -1,5 +1,37 @@
 import type { Theme } from '@mui/material/styles'
 
+import type { Outage } from '../types'
+
+const STATUS_RANK = [
+  'Healthy',
+  'Unknown',
+  'Partial',
+  'Suspected',
+  'Degraded',
+  'CapacityExhausted',
+  'Down',
+]
+
+export const outageStatus = (outage: Outage): string => {
+  if (outage.end_time?.Valid) {
+    return 'Healthy'
+  }
+  if (!outage.confirmed_at?.Valid) {
+    return 'Suspected'
+  }
+  return outage.severity
+}
+
+export const worstOutageStatus = (outages: Outage[]): string | undefined => {
+  if (outages.length === 0) {
+    return undefined
+  }
+  return outages.reduce((worst, outage) => {
+    const status = outageStatus(outage)
+    return STATUS_RANK.indexOf(status) > STATUS_RANK.indexOf(worst) ? status : worst
+  }, 'Healthy')
+}
+
 const getStatusKey = (status: string): keyof Theme['palette']['status'] | null => {
   switch (status) {
     case 'Healthy':

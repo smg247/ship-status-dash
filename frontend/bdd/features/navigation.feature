@@ -34,7 +34,7 @@ Feature: Navigation
     Given I am on the main dashboard
     When I click the "TRT" team chip
     Then I should be on the team page for "TRT"
-    And I should see the team heading "TRT Sub Components"
+    And I should see the team heading "TRT Dashboard"
 
   Scenario: Browser back navigation works
     Given I am on the main dashboard

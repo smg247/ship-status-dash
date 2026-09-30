@@ -3,15 +3,23 @@ package types
 import (
 	"fmt"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-// ValidateTeamSLOs checks team SLO YAML. Unknown evaluator sources are allowed
-// and ignored at read time. Callers must also reject unknown workspace schemas.
-func (c *DashboardConfig) ValidateTeamSLOs() error {
-	if c == nil {
-		return nil
-	}
-	seenTeams := map[string]bool{}
+// SLOComponentView is one flagged component's active outages on the SLO page.
+type SLOComponentView struct {
+	Component    string   `json:"component"`
+	SubComponent string   `json:"sub_component"`
+	Outages      []Outage `json:"outages"`
+}
+
+// ValidateTeamSLOs checks team SLO YAML.
+// known reports whether this build accepts the workspace schema.
+// validateSpec checks schema-specific settings and may be nil.
+// Unknown evaluator sources are allowed and ignored at read time.
+func (c *DashboardConfig) ValidateTeamSLOs(known func(kind string, version int) bool, validateSpec func(*SLOWorkspace) error) error {
+	seenTeams := sets.New[string]()
 	listedSLOComponents := map[string]string{}
 	for i := range c.TeamSLOs {
 		team := &c.TeamSLOs[i]
@@ -19,27 +27,25 @@ func (c *DashboardConfig) ValidateTeamSLOs() error {
 		if name == "" {
 			return fmt.Errorf("team_slos[%d]: team is required", i)
 		}
-		if seenTeams[name] {
+		if seenTeams.Has(name) {
 			return fmt.Errorf("team_slos: duplicate team %q", name)
 		}
-		seenTeams[name] = true
+		seenTeams.Insert(name)
 		if len(team.Owners) == 0 {
 			return fmt.Errorf("team_slos %q: owners is required", name)
 		}
 		if !ownersPresent(team.Owners) {
 			return fmt.Errorf("team_slos %q: owners must include a user, service account, or rover group", name)
 		}
-		workspaces := 0
-		seenSLOComponent := map[string]bool{}
-		for _, raw := range team.SLOComponents {
-			slug := strings.TrimSpace(raw)
-			if slug == "" {
+		seenSLOComponent := sets.New[string]()
+		for _, slug := range team.SLOComponents {
+			if strings.TrimSpace(slug) == "" {
 				return fmt.Errorf("team_slos %q: slo_component slug is required", name)
 			}
-			if seenSLOComponent[slug] {
+			if seenSLOComponent.Has(slug) {
 				return fmt.Errorf("team_slos %q: duplicate slo_component %q", name, slug)
 			}
-			seenSLOComponent[slug] = true
+			seenSLOComponent.Insert(slug)
 			if listedOn, ok := listedSLOComponents[slug]; ok {
 				return fmt.Errorf("slo_component %q is listed on both %q and %q", slug, listedOn, name)
 			}
@@ -52,36 +58,37 @@ func (c *DashboardConfig) ValidateTeamSLOs() error {
 				return fmt.Errorf("team_slos %q: component %q is not marked slo_component", name, slug)
 			}
 		}
-		seenSLO := map[string]bool{}
+		seenSLO := sets.New[string]()
+		var workspace *SLOWorkspace
 		for j := range team.SLOs {
 			slo := &team.SLOs[j]
 			if strings.TrimSpace(slo.Name) == "" {
 				return fmt.Errorf("team_slos %q: slo name is required", name)
 			}
-			if seenSLO[slo.Name] {
+			if seenSLO.Has(slo.Name) {
 				return fmt.Errorf("team_slos %q: duplicate slo %q", name, slo.Name)
 			}
-			seenSLO[slo.Name] = true
+			seenSLO.Insert(slo.Name)
 			if strings.TrimSpace(slo.Source) == "" {
 				return fmt.Errorf("team_slos %q slo %q: source is required", name, slo.Name)
 			}
 			if slo.Workspace == nil {
 				continue
 			}
-			workspaces++
-			if workspaces > 1 {
+			if workspace != nil {
 				return fmt.Errorf("team_slos %q: only one workspace is allowed", name)
 			}
-			if err := validateWorkspace(name, slo.Workspace); err != nil {
+			workspace = slo.Workspace
+			if err := validateWorkspaceIdentity(name, workspace, known, validateSpec); err != nil {
 				return err
 			}
 		}
 	}
 	for _, component := range c.Components {
-		if component == nil || !component.SLOComponent {
+		if !component.SLOComponent {
 			continue
 		}
-		slug := component.EffectiveSlug()
+		slug := component.Slug
 		if _, ok := listedSLOComponents[slug]; !ok {
 			return fmt.Errorf("component %q is marked slo_component but is not listed in team_slos", slug)
 		}
@@ -89,43 +96,20 @@ func (c *DashboardConfig) ValidateTeamSLOs() error {
 	return nil
 }
 
-// NormalizeTeamSLOs applies defaults after validation.
-func (c *DashboardConfig) NormalizeTeamSLOs() {
-	if c == nil {
-		return
-	}
-	for i := range c.TeamSLOs {
-		for j, slug := range c.TeamSLOs[i].SLOComponents {
-			c.TeamSLOs[i].SLOComponents[j] = strings.TrimSpace(slug)
-		}
-		for j := range c.TeamSLOs[i].SLOs {
-			ws := c.TeamSLOs[i].SLOs[j].Workspace
-			if ws != nil && ws.RecentPayloads <= 0 {
-				ws.RecentPayloads = 5
-			}
-		}
-	}
-}
-
-func validateWorkspace(team string, ws *SLOWorkspace) error {
+func validateWorkspaceIdentity(team string, ws *SLOWorkspace, known func(kind string, version int) bool, validateSpec func(*SLOWorkspace) error) error {
 	if strings.TrimSpace(ws.Kind) == "" {
 		return fmt.Errorf("team_slos %q: workspace.kind is required", team)
 	}
 	if ws.SchemaVersion <= 0 {
 		return fmt.Errorf("team_slos %q: workspace.schema_version is required", team)
 	}
-	if ws.RecentPayloads < 0 {
-		return fmt.Errorf("team_slos %q: recent_payloads must be positive", team)
+	if known != nil && !known(ws.Kind, ws.SchemaVersion) {
+		return fmt.Errorf("team_slos %q: unknown workspace schema %s v%d", team, ws.Kind, ws.SchemaVersion)
 	}
-	seen := map[string]bool{}
-	for _, stream := range ws.Streams {
-		if strings.TrimSpace(stream.Name) == "" {
-			return fmt.Errorf("team_slos %q: stream name is required", team)
+	if validateSpec != nil {
+		if err := validateSpec(ws); err != nil {
+			return fmt.Errorf("team_slos %q: %w", team, err)
 		}
-		if seen[stream.Name] {
-			return fmt.Errorf("team_slos %q: duplicate stream %q", team, stream.Name)
-		}
-		seen[stream.Name] = true
 	}
 	return nil
 }
@@ -137,4 +121,50 @@ func ownersPresent(owners []Owner) bool {
 		}
 	}
 	return false
+}
+
+// SummaryTeamNames is the team_slos team list.
+func (c *DashboardConfig) SummaryTeamNames() []string {
+	seen := sets.New[string]()
+	var names []string
+	for _, slo := range c.TeamSLOs {
+		if slo.Team == "" || seen.Has(slo.Team) {
+			continue
+		}
+		seen.Insert(slo.Team)
+		names = append(names, slo.Team)
+	}
+	return names
+}
+
+// SLOComponentsForTeam lists components named on the team's slo_components list.
+func (c *DashboardConfig) SLOComponentsForTeam(team string, outagesByRef map[SubComponentRef][]Outage) []SLOComponentView {
+	teamCfg := c.TeamSLOByTeam(team)
+	if teamCfg == nil {
+		return []SLOComponentView{}
+	}
+	var out []SLOComponentView
+	for _, slug := range teamCfg.SLOComponents {
+		component := c.GetComponentBySlug(slug)
+		if component == nil || !component.SLOComponent {
+			continue
+		}
+		for i := range component.Subcomponents {
+			sub := &component.Subcomponents[i]
+			ref := SubComponentRef{ComponentSlug: component.Slug, SubSlug: sub.Slug}
+			outages := outagesByRef[ref]
+			if outages == nil {
+				outages = []Outage{}
+			}
+			out = append(out, SLOComponentView{
+				Component:    component.Name,
+				SubComponent: sub.Name,
+				Outages:      outages,
+			})
+		}
+	}
+	if out == nil {
+		out = []SLOComponentView{}
+	}
+	return out
 }

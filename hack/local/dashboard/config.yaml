@@ -152,13 +152,15 @@ team_slos:
         workspace:
           kind: payload_streams
           schema_version: 1
+          window: 24h
+          min_accepted: 1
           recent_payloads: 2
           streams:
-            - controller: amd64
+            - release_controller: amd64
               name: "5.1.0-0.nightly"
-            - controller: amd64
+            - release_controller: amd64
               name: "5.1.0-0.ci"
-            - controller: amd64
+            - release_controller: amd64
               name: "5.0.0-0.nightly"
-            - controller: amd64
+            - release_controller: amd64
               name: "5.0.0-0.ci"

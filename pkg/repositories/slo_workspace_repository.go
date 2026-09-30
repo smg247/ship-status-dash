@@ -15,9 +15,7 @@ type SLOWorkspaceRepository interface {
 	UpsertItem(item *types.SLOWorkspaceItem) (*types.SLOWorkspaceItem, error)
 	DeleteItem(team, kind, itemKey string) error
 	DeleteItems(ids []uint) error
-	// PruneTeamItems locks the team's rows, asks idsFrom which of those IDs to drop,
-	// and deletes them in the same transaction. Selection uses the locked snapshot
-	// so a concurrent upsert that makes a row ineligible for retention is not deleted.
+	// PruneTeamItems locks the team's rows and deletes the IDs idsFrom returns, in that transaction.
 	PruneTeamItems(team string, idsFrom func(items []types.SLOWorkspaceItem) []uint) error
 	AddLink(link *types.SLOWorkspaceLink) (*types.SLOWorkspaceLink, error)
 	DeleteLink(team, kind, itemKey string, linkID uint) error

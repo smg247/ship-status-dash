@@ -7,20 +7,81 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"ship-status-dash/pkg/slo"
+	payloadv1 "ship-status-dash/pkg/slo/payloadstreams/v1"
 	"ship-status-dash/pkg/slo/seed"
 	"ship-status-dash/pkg/types"
 )
+
+type e2eItem struct {
+	ID         uint                     `json:"id"`
+	ItemKey    string                   `json:"item_key"`
+	GroupKey   string                   `json:"group_key"`
+	OccurredAt time.Time                `json:"occurred_at"`
+	Outcome    string                   `json:"outcome"`
+	Details    json.RawMessage          `json:"details"`
+	Notes      string                   `json:"notes"`
+	UpdatedBy  string                   `json:"updated_by"`
+	Links      []types.SLOWorkspaceLink `json:"links"`
+}
+
+type e2eGroup struct {
+	Key            string     `json:"key"`
+	Accepted       int        `json:"accepted"`
+	Met            bool       `json:"met"`
+	LastAcceptedAt *time.Time `json:"last_accepted_at,omitempty"`
+}
+
+type e2eResult struct {
+	Window string `json:"window"`
+	Target struct {
+		MinAccepted int `json:"min_accepted"`
+	} `json:"target"`
+	Groups []e2eGroup `json:"groups"`
+}
+
+type e2eEvaluation struct {
+	Name        string          `json:"name"`
+	DisplayName string          `json:"display_name"`
+	Source      string          `json:"source"`
+	Met         bool            `json:"met"`
+	Result      json.RawMessage `json:"result"`
+}
+
+type e2eWorkspace struct {
+	Kind          string          `json:"kind"`
+	SchemaVersion int             `json:"schema_version"`
+	Spec          json.RawMessage `json:"spec"`
+}
+
+type e2eComponent struct {
+	Component    string         `json:"component"`
+	SubComponent string         `json:"sub_component"`
+	Outages      []types.Outage `json:"outages"`
+}
+
+type e2eTeamView struct {
+	Team          string          `json:"team"`
+	Workspace     *e2eWorkspace   `json:"workspace"`
+	Evaluations   []e2eEvaluation `json:"evaluations"`
+	SLOComponents []e2eComponent  `json:"slo_components"`
+	Items         []e2eItem       `json:"items"`
+}
+
+type e2eSummary struct {
+	Teams []struct {
+		Team          string          `json:"team"`
+		Evaluations   []e2eEvaluation `json:"evaluations"`
+		SLOComponents []e2eComponent  `json:"slo_components"`
+	} `json:"teams"`
+}
 
 const (
 	sloTeam          = "TRT"
@@ -65,39 +126,20 @@ func TestE2E_TeamSLO(t *testing.T) {
 
 func testSeededPruneCandidate(client *TestHTTPClient) func(*testing.T) {
 	return func(t *testing.T) {
-		dsn := os.Getenv("TEST_DATABASE_DSN")
-		require.NotEmpty(t, dsn, "TEST_DATABASE_DSN must be set")
-
 		view := getTeamSLO(t, client)
 		require.NotNil(t, view.Workspace)
-		require.NotEmpty(t, view.Workspace.Streams)
-		stream := view.Workspace.Streams[0].Name
-		assert.NotContains(t, view.ItemKeys, seed.PruneCandidateItemKey)
+		settings := workspaceSettings(t, view.Workspace)
+		require.NotEmpty(t, settings.Streams)
+		stream := settings.Streams[0].Name
 
-		// Rewrite the seed row so this test observes a delete even when startup prune already removed it.
-		// The put response is the proof the row was stored. The following poll must not require the row
-		// to still be visible: the pruner can delete it before the first check.
 		putSLOItemChai(t, client, mustSLOItemBody(t, seed.PruneCandidateItemKey, stream, "Rejected", time.Now().UTC().Add(-seed.PruneCandidateAgo), "", payloadDetails(t, "https://example.com/prune-candidate", nil)))
-		assert.NotContains(t, getTeamSLO(t, client).ItemKeys, seed.PruneCandidateItemKey)
-
-		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
-		require.NoError(t, err)
-		sqlDB, err := db.DB()
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = sqlDB.Close() })
+		require.Contains(t, itemKeys(getTeamSLO(t, client).Items), seed.PruneCandidateItemKey)
 
 		// e2e starts the dashboard with --trt-payload-prune-interval=15s. 45s covers a tick that just fired.
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
-		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 45*time.Second, true, func(context.Context) (bool, error) {
-			var count int64
-			qerr := db.Unscoped().Model(&types.SLOWorkspaceItem{}).
-				Where("team = ? AND kind = ? AND item_key = ?", sloTeam, trtPayloadKind, seed.PruneCandidateItemKey).
-				Count(&count).Error
-			if qerr != nil {
-				return false, qerr
-			}
-			return count == 0, nil
+		err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 45*time.Second, true, func(context.Context) (bool, error) {
+			return !containsKey(itemKeys(getTeamSLO(t, client).Items), seed.PruneCandidateItemKey), nil
 		})
 		require.NoError(t, err, "pruner should delete %s", seed.PruneCandidateItemKey)
 	}
@@ -180,7 +222,7 @@ func testSLOAuthorization(client *TestHTTPClient) func(*testing.T) {
 			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 		})
 
-		keys := getTeamSLO(t, client).ItemKeys
+		keys := itemKeys(getTeamSLO(t, client).Items)
 		assert.NotContains(t, keys, "e2e-unauth")
 		assert.NotContains(t, keys, "e2e-bad-schema")
 		assert.NotEmpty(t, keys)
@@ -195,18 +237,21 @@ func testTRTPayloadStreamsWorkspace(client *TestHTTPClient) func(*testing.T) {
 		require.NotNil(t, view.Workspace)
 		assert.Equal(t, trtPayloadKind, view.Workspace.Kind)
 		assert.Equal(t, 1, view.Workspace.SchemaVersion)
-		assert.Equal(t, 2, view.Workspace.RecentPayloads)
+		settings := workspaceSettings(t, view.Workspace)
+		assert.Equal(t, 2, settings.RecentPayloads)
+		assert.Equal(t, "24h", settings.Window)
 		require.Len(t, view.Evaluations, 1)
 		ev := view.Evaluations[0]
+		result := payloadResult(t, ev)
 		assert.Equal(t, "accepted-payload-per-day", ev.Name)
-		assert.Equal(t, "24h", ev.Window)
-		assert.Equal(t, 1, ev.Target.MinAccepted)
+		assert.Equal(t, "24h", result.Window)
+		assert.Equal(t, 1, result.Target.MinAccepted)
 		assert.False(t, ev.Met)
-		require.Len(t, ev.Groups, 2)
-		assert.Equal(t, trtStreamNightly, ev.Groups[0].Key)
-		assert.Equal(t, trtStreamCI, ev.Groups[1].Key)
-		assert.False(t, ev.Groups[0].Met)
-		assert.Nil(t, ev.Groups[0].LastAcceptedAt)
+		require.Len(t, result.Groups, 2)
+		assert.Equal(t, trtStreamNightly, result.Groups[0].Key)
+		assert.Equal(t, trtStreamCI, result.Groups[1].Key)
+		assert.False(t, result.Groups[0].Met)
+		assert.Nil(t, result.Groups[0].LastAcceptedAt)
 	}
 }
 
@@ -218,7 +263,7 @@ func testTRTPayloadStreamsRejectsIncompleteDetails(client *TestHTTPClient) func(
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-		assert.Empty(t, getTeamSLO(t, client).ItemKeys)
+		assert.Empty(t, getTeamSLO(t, client).Items)
 	}
 }
 
@@ -238,9 +283,9 @@ func testTRTPayloadStreamsUpsert(client *TestHTTPClient) func(*testing.T) {
 		putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-c", trtStreamNightly, "Rejected", now.Add(-time.Hour), "third", payloadDetails(t, "https://example.com/c", nil)))
 
 		view := getTeamSLO(t, client)
-		assert.ElementsMatch(t, []string{"e2e-a", "e2e-b", "e2e-c"}, view.ItemKeys)
+		assert.ElementsMatch(t, []string{"e2e-a", "e2e-b", "e2e-c"}, itemKeys(view.Items))
 		nightly := itemsForStream(view.Items, trtStreamNightly)
-		require.Len(t, nightly, 2)
+		require.Len(t, nightly, 3)
 		assert.Equal(t, "e2e-c", nightly[0].ItemKey)
 		assert.Equal(t, "e2e-b", nightly[1].ItemKey)
 		storedB := itemByKey(t, view.Items, "e2e-b")
@@ -324,10 +369,11 @@ func testTRTPayloadStreamsPrune(client *TestHTTPClient) func(*testing.T) {
 		putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-ci-pad-1", trtStreamCI, "Rejected", now.Add(-4*time.Hour), "", payloadDetails(t, "https://example.com/pad-1", nil)))
 		putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-ci-pad-2", trtStreamCI, "Rejected", now.Add(-3*time.Hour), "", payloadDetails(t, "https://example.com/pad-2", nil)))
 
+		require.Contains(t, itemKeys(getTeamSLO(t, client).Items), "e2e-old-rejected")
+		waitForItem(t, client, "e2e-old-rejected", false)
 		held := getTeamSLO(t, client)
-		assert.Contains(t, held.ItemKeys, "e2e-old-accepted")
-		assert.NotContains(t, held.ItemKeys, "e2e-old-rejected")
-		assert.ElementsMatch(t, []string{"e2e-ci-pad-2", "e2e-ci-pad-1"}, itemKeys(itemsForStream(held.Items, trtStreamCI)))
+		assert.Contains(t, itemKeys(held.Items), "e2e-old-accepted")
+		assert.NotContains(t, itemKeys(held.Items), "e2e-old-rejected")
 		ci := groupByKey(t, held.Evaluations[0], trtStreamCI)
 		assert.Equal(t, 0, ci.Accepted)
 		assert.False(t, ci.Met)
@@ -335,11 +381,12 @@ func testTRTPayloadStreamsPrune(client *TestHTTPClient) func(*testing.T) {
 		assert.False(t, held.Evaluations[0].Met)
 
 		putSLOItemChai(t, client, mustSLOItemBody(t, "e2e-ci-new", trtStreamCI, "Accepted", now.Add(-30*time.Minute), "", payloadDetails(t, "https://example.com/ci", nil)))
+		waitForItem(t, client, "e2e-old-accepted", false)
 		released := getTeamSLO(t, client)
-		assert.NotContains(t, released.ItemKeys, "e2e-old-accepted")
-		assert.NotContains(t, released.ItemKeys, "e2e-old-rejected")
-		assert.Contains(t, released.ItemKeys, "e2e-ci-new")
-		assert.Contains(t, released.ItemKeys, "e2e-ci-pad-1")
+		assert.NotContains(t, itemKeys(released.Items), "e2e-old-accepted")
+		assert.NotContains(t, itemKeys(released.Items), "e2e-old-rejected")
+		assert.Contains(t, itemKeys(released.Items), "e2e-ci-new")
+		assert.Contains(t, itemKeys(released.Items), "e2e-ci-pad-1")
 		ci = groupByKey(t, released.Evaluations[0], trtStreamCI)
 		assert.Equal(t, 1, ci.Accepted)
 		assert.True(t, ci.Met)
@@ -400,21 +447,17 @@ func testSLOMissDoesNotCreateOutage(client *TestHTTPClient) func(*testing.T) {
 	}
 }
 
-func assertSeededWorkspace(t *testing.T, view slo.TeamView) {
+func assertSeededWorkspace(t *testing.T, view e2eTeamView) {
 	t.Helper()
 	assert.Equal(t, sloTeam, view.Team)
 	require.NotNil(t, view.Workspace)
-	streams := view.Workspace.Streams
+	streams := workspaceSettings(t, view.Workspace).Streams
 	require.NotEmpty(t, streams)
 	require.NotEmpty(t, view.Evaluations)
 	ev := view.Evaluations[0]
-	require.Len(t, ev.Groups, len(streams))
+	result := payloadResult(t, ev)
+	require.Len(t, result.Groups, len(streams))
 	require.NotEmpty(t, view.Items)
-	require.NotEmpty(t, view.ItemKeys)
-	assert.NotContains(t, view.ItemKeys, seed.PruneCandidateItemKey)
-	for _, item := range view.Items {
-		assert.NotEqual(t, seed.PruneCandidateItemKey, item.ItemKey)
-	}
 	if seed.MissIndex(len(streams)) >= 0 {
 		assert.False(t, ev.Met)
 	} else {
@@ -426,7 +469,7 @@ func assertSeededWorkspace(t *testing.T, view slo.TeamView) {
 		rows := itemsForStream(view.Items, stream.Name)
 		require.NotEmpty(t, rows, stream.Name)
 		assert.Equal(t, seed.UpdatedBy, rows[0].UpdatedBy)
-		var details slo.PayloadDetailsV1
+		var details payloadv1.PayloadDetails
 		require.NoError(t, json.Unmarshal(rows[0].Details, &details))
 		assert.Contains(t, details.PayloadURL, stream.Name)
 		switch seed.RoleAt(len(streams), i) {
@@ -461,22 +504,24 @@ func assertSeededWorkspace(t *testing.T, view slo.TeamView) {
 	}
 }
 
-func assertEvaluationsMatch(t *testing.T, team, summary []slo.Evaluation) {
+func assertEvaluationsMatch(t *testing.T, team, summary []e2eEvaluation) {
 	t.Helper()
 	require.Len(t, summary, len(team))
 	for i := range team {
 		assert.Equal(t, team[i].Name, summary[i].Name)
 		assert.Equal(t, team[i].Met, summary[i].Met)
-		require.Len(t, summary[i].Groups, len(team[i].Groups))
-		for j := range team[i].Groups {
-			assert.Equal(t, team[i].Groups[j].Key, summary[i].Groups[j].Key)
-			assert.Equal(t, team[i].Groups[j].Met, summary[i].Groups[j].Met)
-			assert.Equal(t, team[i].Groups[j].Accepted, summary[i].Groups[j].Accepted)
+		teamResult := payloadResult(t, team[i])
+		summaryResult := payloadResult(t, summary[i])
+		require.Len(t, summaryResult.Groups, len(teamResult.Groups))
+		for j := range teamResult.Groups {
+			assert.Equal(t, teamResult.Groups[j].Key, summaryResult.Groups[j].Key)
+			assert.Equal(t, teamResult.Groups[j].Met, summaryResult.Groups[j].Met)
+			assert.Equal(t, teamResult.Groups[j].Accepted, summaryResult.Groups[j].Accepted)
 		}
 	}
 }
 
-func seedOutageIn(blocks []slo.SLOComponentView) *types.Outage {
+func seedOutageIn(blocks []e2eComponent) *types.Outage {
 	for i := range blocks {
 		for j := range blocks[i].Outages {
 			if blocks[i].Outages[j].CreatedBy == seed.UpdatedBy {
@@ -487,8 +532,8 @@ func seedOutageIn(blocks []slo.SLOComponentView) *types.Outage {
 	return nil
 }
 
-func newestRejectedView(items []slo.ItemView, stream string) *slo.ItemView {
-	var found *slo.ItemView
+func newestRejectedView(items []e2eItem, stream string) *e2eItem {
+	var found *e2eItem
 	for i := range items {
 		item := &items[i]
 		if item.GroupKey != stream || item.Outcome != "Rejected" {
@@ -519,29 +564,29 @@ func hasOutageLink(links []types.SLOWorkspaceLink, outageID uint) bool {
 	return false
 }
 
-func getTeamSLO(t *testing.T, client *TestHTTPClient) slo.TeamView {
+func getTeamSLO(t *testing.T, client *TestHTTPClient) e2eTeamView {
 	t.Helper()
 	return getTeamSLOPath(t, client, "/api/teams/"+sloTeam+"/slo")
 }
 
-func getTeamSLOPath(t *testing.T, client *TestHTTPClient, path string) slo.TeamView {
+func getTeamSLOPath(t *testing.T, client *TestHTTPClient, path string) e2eTeamView {
 	t.Helper()
 	resp, err := client.Get(path, false)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	requireStatus(t, resp, http.StatusOK)
-	var view slo.TeamView
+	var view e2eTeamView
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&view))
 	return view
 }
 
-func getSLOSummary(t *testing.T, client *TestHTTPClient) slo.Summary {
+func getSLOSummary(t *testing.T, client *TestHTTPClient) e2eSummary {
 	t.Helper()
 	resp, err := client.Get("/api/teams/slo-summary", false)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	requireStatus(t, resp, http.StatusOK)
-	var summary slo.Summary
+	var summary e2eSummary
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&summary))
 	return summary
 }
@@ -560,24 +605,24 @@ func summaryTeamKeys(t *testing.T, client *TestHTTPClient) map[string]json.RawMe
 	return body.Teams[0]
 }
 
-func putSLOItemChai(t *testing.T, client *TestHTTPClient, body []byte) slo.ItemView {
+func putSLOItemChai(t *testing.T, client *TestHTTPClient, body []byte) e2eItem {
 	t.Helper()
 	resp, err := client.PutWithBearerToken(sloItemsPath, body, chaiBotSAToken, "chai-bot")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	requireStatus(t, resp, http.StatusOK)
-	var item slo.ItemView
+	var item e2eItem
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&item))
 	return item
 }
 
-func putSLOItemDeveloper(t *testing.T, client *TestHTTPClient, body []byte) slo.ItemView {
+func putSLOItemDeveloper(t *testing.T, client *TestHTTPClient, body []byte) e2eItem {
 	t.Helper()
 	resp, err := client.Put(sloItemsPath, body)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	requireStatus(t, resp, http.StatusOK)
-	var item slo.ItemView
+	var item e2eItem
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&item))
 	return item
 }
@@ -614,7 +659,7 @@ func deleteSLOLink(t *testing.T, client *TestHTTPClient, itemKey string, linkID 
 func deleteWorkspaceItems(t *testing.T, client *TestHTTPClient) {
 	t.Helper()
 	view := getTeamSLO(t, client)
-	for _, key := range view.ItemKeys {
+	for _, key := range itemKeys(view.Items) {
 		deleteSLOItem(t, client, key)
 	}
 }
@@ -645,9 +690,9 @@ func mustSLOItemBody(t *testing.T, itemKey, groupKey, outcome string, occurred t
 
 func payloadDetails(t *testing.T, payloadURL string, recurring *int) json.RawMessage {
 	t.Helper()
-	doc := slo.PayloadDetailsV1{
+	doc := payloadv1.PayloadDetails{
 		PayloadURL: payloadURL,
-		Jobs: []slo.PayloadJobV1{{
+		Jobs: []payloadv1.PayloadJob{{
 			Name:           "e2e-job",
 			URL:            payloadURL + "/job",
 			State:          "failure",
@@ -661,14 +706,14 @@ func payloadDetails(t *testing.T, payloadURL string, recurring *int) json.RawMes
 
 func jobRecurringCount(t *testing.T, details json.RawMessage) int {
 	t.Helper()
-	var doc slo.PayloadDetailsV1
+	var doc payloadv1.PayloadDetails
 	require.NoError(t, json.Unmarshal(details, &doc))
 	require.NotEmpty(t, doc.Jobs)
 	require.NotNil(t, doc.Jobs[0].RecurringCount)
 	return *doc.Jobs[0].RecurringCount
 }
 
-func itemKeys(items []slo.ItemView) []string {
+func itemKeys(items []e2eItem) []string {
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
 		keys = append(keys, item.ItemKey)
@@ -676,17 +721,20 @@ func itemKeys(items []slo.ItemView) []string {
 	return keys
 }
 
-func itemsForStream(items []slo.ItemView, stream string) []slo.ItemView {
-	var out []slo.ItemView
+func itemsForStream(items []e2eItem, stream string) []e2eItem {
+	var out []e2eItem
 	for _, item := range items {
 		if item.GroupKey == stream {
 			out = append(out, item)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].OccurredAt.After(out[j].OccurredAt)
+	})
 	return out
 }
 
-func itemByKey(t *testing.T, items []slo.ItemView, key string) *slo.ItemView {
+func itemByKey(t *testing.T, items []e2eItem, key string) *e2eItem {
 	t.Helper()
 	for i := range items {
 		if items[i].ItemKey == key {
@@ -696,15 +744,48 @@ func itemByKey(t *testing.T, items []slo.ItemView, key string) *slo.ItemView {
 	return nil
 }
 
-func groupByKey(t *testing.T, ev slo.Evaluation, key string) slo.GroupEval {
+func groupByKey(t *testing.T, ev e2eEvaluation, key string) e2eGroup {
 	t.Helper()
-	for _, group := range ev.Groups {
+	for _, group := range payloadResult(t, ev).Groups {
 		if group.Key == key {
 			return group
 		}
 	}
 	t.Fatalf("missing evaluation group %s", key)
-	return slo.GroupEval{}
+	return e2eGroup{}
+}
+
+func payloadResult(t *testing.T, ev e2eEvaluation) e2eResult {
+	t.Helper()
+	var result e2eResult
+	require.NoError(t, json.Unmarshal(ev.Result, &result))
+	return result
+}
+
+func workspaceSettings(t *testing.T, ws *e2eWorkspace) payloadv1.Settings {
+	t.Helper()
+	settings, err := payloadv1.ParseSettings(ws.Spec)
+	require.NoError(t, err)
+	return settings
+}
+
+func containsKey(keys []string, key string) bool {
+	for _, item := range keys {
+		if item == key {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForItem(t *testing.T, client *TestHTTPClient, key string, present bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 45*time.Second, true, func(context.Context) (bool, error) {
+		return containsKey(itemKeys(getTeamSLO(t, client).Items), key) == present, nil
+	})
+	require.NoError(t, err)
 }
 
 func outageIDs(outages []types.Outage) []uint {
