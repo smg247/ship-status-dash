@@ -12,8 +12,8 @@ export const formatAge = (iso?: string): string => {
   return `${Math.round(hours / 24)}d`
 }
 
-export const sloComponentDomId = (componentName: string) =>
-  `slo-component-${slugify(componentName)}`
+export const sloComponentDomId = (componentName: string, subComponentName: string) =>
+  `slo-component-${slugify(componentName)}-${slugify(subComponentName)}`
 
 export const streamDomId = (streamName: string) => `stream-${streamName}`
 

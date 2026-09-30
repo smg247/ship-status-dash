@@ -1,6 +1,7 @@
 import { Alert, Box, CircularProgress, Container, styled, Typography } from '@mui/material'
 import React, { useCallback, useEffect, useState } from 'react'
 
+import useAbortableGet from '../hooks/useAbortableGet'
 import useIntervalRefresh from '../hooks/useIntervalRefresh'
 import type { Component, TeamSLOSummary } from '../types'
 import { deferMountFetch } from '../utils/deferMountFetch'
@@ -63,6 +64,10 @@ const ComponentsGrid = styled(Box)(({ theme }) => ({
   gap: theme.spacing(3),
 }))
 
+const SummaryError = styled(Alert)(({ theme }) => ({
+  marginBottom: theme.spacing(3),
+}))
+
 const getLogoSrc = (isDarkMode: boolean, inOutage: boolean) => {
   if (inOutage) {
     return isDarkMode ? '/logo-outage-dark.svg' : '/logo-outage.svg'
@@ -75,7 +80,11 @@ const ComponentStatusList: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inOutage, setInOutage] = useState(false)
-  const [sloSummary, setSloSummary] = useState<TeamSLOSummary | null>(null)
+  const {
+    data: sloSummary,
+    error: sloError,
+    reload: reloadSLO,
+  } = useAbortableGet<TeamSLOSummary>(getTeamSLOSummaryEndpoint())
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('theme')
     return saved === 'dark'
@@ -97,11 +106,6 @@ const ComponentStatusList: React.FC = () => {
   }, [])
 
   const loadHomeStatus = useCallback((silent: boolean) => {
-    fetch(getTeamSLOSummaryEndpoint())
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: TeamSLOSummary | null) => setSloSummary(data))
-      .catch(() => setSloSummary(null))
-
     Promise.all([
       fetch(getComponentsEndpoint()).then((res) => {
         if (!res.ok) throw new Error(`Failed to fetch components: HTTP ${res.status}`)
@@ -150,7 +154,10 @@ const ComponentStatusList: React.FC = () => {
     }
   }, [loadHomeStatus])
 
-  useIntervalRefresh(() => loadHomeStatus(true))
+  useIntervalRefresh(() => {
+    loadHomeStatus(true)
+    reloadSLO(true)
+  })
 
   if (loading) {
     return (
@@ -181,6 +188,7 @@ const ComponentStatusList: React.FC = () => {
 
       <UnhealthyWell onHasOutagesChange={setInOutage} />
 
+      {sloError && <SummaryError severity="error">{sloError}</SummaryError>}
       {sloSummary && sloSummary.teams.length > 0 && <TeamSLOSummaryWell summary={sloSummary} />}
 
       <ComponentsGrid data-tour="component-list">

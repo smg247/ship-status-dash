@@ -22,7 +22,7 @@ Before starting the frontend, ensure the backend services are running:
 
    ```bash
    VITE_PUBLIC_DOMAIN=http://localhost:8180 \
-   VITE_PROTECTED_DOMAIN=http://localhost:8443 \
+   VITE_PROTECTED_DOMAIN=http://localhost:3030 \
    npm start
    ```
 

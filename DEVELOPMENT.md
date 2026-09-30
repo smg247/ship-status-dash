@@ -155,7 +155,7 @@ Both processes use the same HMAC secret:
 3. Start the development server. [`frontend/.env.development`](frontend/.env.development) already sets `VITE_PUBLIC_DOMAIN` and `VITE_PROTECTED_DOMAIN` for local URLs; override inline if needed:
    ```bash
    VITE_PUBLIC_DOMAIN=http://localhost:8180 \
-   VITE_PROTECTED_DOMAIN=http://localhost:8443 \
+   VITE_PROTECTED_DOMAIN=http://localhost:3030 \
    npm start
    ```
 

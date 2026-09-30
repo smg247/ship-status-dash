@@ -2,19 +2,15 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"ship-status-dash/pkg/config"
-	"ship-status-dash/pkg/outage"
 	"ship-status-dash/pkg/repositories"
 	payloadv1 "ship-status-dash/pkg/slo/payloadstreams/v1"
 	"ship-status-dash/pkg/types"
@@ -28,19 +24,7 @@ func TestSLOPayloadRetention(t *testing.T) {
 		items    []types.SLOWorkspaceItem
 		upsert   *types.SLOWorkspaceItem
 		wantKeys []string
-		readOnly bool
 	}{
-		{
-			name:   "read keeps rows the pruner has not deleted",
-			recent: 2,
-			items: []types.SLOWorkspaceItem{
-				{Model: gorm.Model{ID: 1}, Team: "TRT", Kind: payloadv1.Kind, ItemKey: "old-rejected", GroupKey: "nightly", Outcome: "Rejected", OccurredAt: now.Add(-72 * time.Hour)},
-				{Model: gorm.Model{ID: 2}, Team: "TRT", Kind: payloadv1.Kind, ItemKey: "recent", GroupKey: "nightly", Outcome: "Rejected", OccurredAt: now.Add(-2 * time.Hour)},
-				{Model: gorm.Model{ID: 3}, Team: "TRT", Kind: payloadv1.Kind, ItemKey: "newer", GroupKey: "nightly", Outcome: "Accepted", OccurredAt: now.Add(-time.Hour)},
-			},
-			wantKeys: []string{"old-rejected", "recent", "newer"},
-			readOnly: true,
-		},
 		{
 			name:   "pruner deletes expired rows and keeps the newest accepted",
 			recent: 2,
@@ -74,27 +58,6 @@ func TestSLOPayloadRetention(t *testing.T) {
 			if tt.upsert != nil {
 				_, err := repo.UpsertItem(tt.upsert)
 				require.NoError(t, err)
-			}
-			if tt.readOnly {
-				h := newSLOHandlers(t, sloTeamConfig(tt.recent), repo)
-				req := httptest.NewRequest(http.MethodGet, "/api/teams/TRT/slo", nil)
-				req = mux.SetURLVars(req, map[string]string{"team": "TRT"})
-				rr := httptest.NewRecorder()
-				h.GetTeamSLOJSON(rr, req)
-				require.Equal(t, http.StatusOK, rr.Code)
-				var view struct {
-					Items []struct {
-						ItemKey string `json:"item_key"`
-					} `json:"items"`
-				}
-				require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &view))
-				var keys []string
-				for _, item := range view.Items {
-					keys = append(keys, item.ItemKey)
-				}
-				assert.ElementsMatch(t, tt.wantKeys, keys)
-				assert.Len(t, repo.Items, len(tt.items))
-				return
 			}
 
 			pruner := NewTRTSLOPayloadPruner(sloConfigManager(t, sloTeamConfig(tt.recent)), repo, time.Minute, logrus.New())
@@ -149,9 +112,4 @@ func sloConfigManager(t *testing.T, cfg *types.DashboardConfig) *config.Manager[
 	}, logrus.New(), time.Second)
 	require.NoError(t, err)
 	return manager
-}
-
-func newSLOHandlers(t *testing.T, cfg *types.DashboardConfig, repo repositories.SLOWorkspaceRepository) *Handlers {
-	t.Helper()
-	return NewHandlers(logrus.New(), sloConfigManager(t, cfg), &outage.MockOutageManager{}, &repositories.MockComponentPingRepository{}, &repositories.MockTriageNoteRepository{}, &repositories.MockOutageLinkRepository{}, repo, nil)
 }

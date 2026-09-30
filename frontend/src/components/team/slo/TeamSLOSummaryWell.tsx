@@ -1,13 +1,14 @@
 import { Box, Card, styled, Typography } from '@mui/material'
-import type { KeyboardEvent, MouseEvent } from 'react'
+import type { KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router'
 
-import type { Outage, SLOComponentBlock, SLOEvaluation, TeamSLOSummary } from '../../../types'
-import { formatStatusSeverityText, outageStatus, worstOutageStatus } from '../../../utils/helpers'
+import type { SLOComponentBlock, SLOEvaluation, TeamSLOSummary } from '../../../types'
+import { worstOutageStatus } from '../../../utils/helpers'
 import { getStatusTintStyles } from '../../../utils/styles'
 import { StatusChip } from '../../StatusColors'
 
-import { formatAge, openedLabel, outagePath, streamDomId } from './format'
+import { formatAge, streamDomId } from './format'
+import SLOOutageCard from './SLOOutageCard'
 import { trtPayloadResult } from './trt/v1/result'
 
 const Section = styled(Box)(({ theme }) => ({
@@ -83,16 +84,6 @@ const ClickableWell = styled(Card)<{ severity: string }>(({ theme, severity }) =
   },
 }))
 
-const IncidentCard = styled(ClickableWell)(({ theme }) => ({
-  minHeight: 160,
-  height: '100%',
-  padding: theme.spacing(2.5),
-}))
-
-const CardMeta = styled(Meta)({
-  marginBottom: 0,
-})
-
 const NestedWell = styled(Card)<{ status?: string }>(({ theme, status }) => ({
   ...(status
     ? getStatusTintStyles(theme, status, 1.5)
@@ -100,10 +91,6 @@ const NestedWell = styled(Card)<{ status?: string }>(({ theme, status }) => ({
   ...(theme.palette.mode === 'dark' && { backgroundColor: theme.palette.grey[900] }),
   borderRadius: theme.spacing(1.5),
   padding: theme.spacing(2),
-}))
-
-const SeverityRow = styled(Box)(({ theme }) => ({
-  marginBottom: theme.spacing(1),
 }))
 
 const sloStatus = (met: boolean | undefined) => {
@@ -114,47 +101,13 @@ const sloStatus = (met: boolean | undefined) => {
 }
 
 const activateOnKey = (event: KeyboardEvent, action: () => void) => {
+  if (event.target !== event.currentTarget) {
+    return
+  }
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
-    event.stopPropagation()
     action()
   }
-}
-
-interface OutageSummaryWellProps {
-  outage: Outage
-}
-
-const OutageSummaryWell = ({ outage }: OutageSummaryWellProps) => {
-  const navigate = useNavigate()
-  const open = () => navigate(outagePath(outage))
-
-  return (
-    <IncidentCard
-      severity={outageStatus(outage)}
-      role="link"
-      tabIndex={0}
-      onClick={(event: MouseEvent) => {
-        event.stopPropagation()
-        open()
-      }}
-      onKeyDown={(event) => activateOnKey(event, open)}
-    >
-      <SeverityRow>
-        <StatusChip
-          size="small"
-          label={formatStatusSeverityText(outage.severity)}
-          status={outage.severity}
-          variant="filled"
-        />
-      </SeverityRow>
-      <Typography variant="subtitle1">{outage.description || 'Outage'}</Typography>
-      <CardMeta>
-        {openedLabel(outage.start_time)}
-        {outage.discovered_from ? ` · discovered by ${outage.discovered_from}` : ''}
-      </CardMeta>
-    </IncidentCard>
-  )
 }
 
 interface ComponentSummaryWellProps {
@@ -163,12 +116,14 @@ interface ComponentSummaryWellProps {
 
 const ComponentSummaryWell = ({ block }: ComponentSummaryWellProps) => (
   <NestedWell status={worstOutageStatus(block.outages)}>
-    <ComponentTitle>{block.sub_component}</ComponentTitle>
+    <ComponentTitle>
+      {block.component} / {block.sub_component}
+    </ComponentTitle>
     {block.outages.length === 0 && <Meta>No active outages</Meta>}
     {block.outages.length > 0 && (
       <IncidentGrid>
         {block.outages.map((outage) => (
-          <OutageSummaryWell key={outage.ID} outage={outage} />
+          <SLOOutageCard key={outage.ID} outage={outage} stopPropagation />
         ))}
       </IncidentGrid>
     )}

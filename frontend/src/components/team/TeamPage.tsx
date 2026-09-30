@@ -1,9 +1,19 @@
 import { ArrowBack } from '@mui/icons-material'
-import { Button, Container, Paper, styled, Typography } from '@mui/material'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  Container,
+  Paper,
+  styled,
+  Typography,
+} from '@mui/material'
+import { useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router'
 
 import { useAuth } from '../../contexts/AuthContext'
+import useAbortableGet from '../../hooks/useAbortableGet'
 import useIntervalRefresh from '../../hooks/useIntervalRefresh'
 import type { TeamSLO } from '../../types'
 import { getTeamSLOEndpoint } from '../../utils/endpoints'
@@ -58,6 +68,16 @@ const SectionTitle = styled(Typography)(({ theme }) => ({
   margin: theme.spacing(1, 0, 2),
 }))
 
+const SLOLoading = styled(Box)(({ theme }) => ({
+  display: 'flex',
+  justifyContent: 'center',
+  marginBottom: theme.spacing(3),
+}))
+
+const SLOError = styled(Alert)(({ theme }) => ({
+  marginBottom: theme.spacing(2),
+}))
+
 const TeamPage = () => {
   const navigate = useNavigate()
   const { team } = useParams<{ team: string }>()
@@ -65,27 +85,19 @@ const TeamPage = () => {
   const teamColor = decodedTeam ? getTeamColor(decodedTeam) : undefined
   const filters = useMemo(() => ({ team: decodedTeam }), [decodedTeam])
   const { isTeamSLOAdmin } = useAuth()
-  const [slo, setSlo] = useState<TeamSLO | null>(null)
+  const {
+    data: slo,
+    loading: sloLoading,
+    error: sloError,
+    reload: reloadSLO,
+  } = useAbortableGet<TeamSLO>(decodedTeam ? getTeamSLOEndpoint(decodedTeam) : null)
+  const currentSLO = slo?.team === decodedTeam ? slo : null
   const hashScrolled = useRef('')
 
-  const loadSLO = useCallback(() => {
-    if (!decodedTeam) {
-      return
-    }
-    fetch(getTeamSLOEndpoint(decodedTeam))
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: TeamSLO | null) => setSlo(data))
-      .catch(() => setSlo(null))
-  }, [decodedTeam])
+  useIntervalRefresh(() => reloadSLO(true), undefined, decodedTeam !== '')
 
   useEffect(() => {
-    loadSLO()
-  }, [loadSLO])
-
-  useIntervalRefresh(loadSLO, undefined, decodedTeam !== '')
-
-  useEffect(() => {
-    if (!slo) {
+    if (!currentSLO) {
       return
     }
     const id = decodeURIComponent(window.location.hash.replace('#', ''))
@@ -99,15 +111,15 @@ const TeamPage = () => {
     }
     target.scrollIntoView()
     hashScrolled.current = token
-  }, [slo, decodedTeam])
+  }, [currentSLO, decodedTeam])
 
   if (!team) return null
 
-  const hasEvaluations = (slo?.evaluations.length ?? 0) > 0
-  const hasComponents = (slo?.slo_components.length ?? 0) > 0
-  const workspace = slo?.workspace
+  const hasEvaluations = (currentSLO?.evaluations.length ?? 0) > 0
+  const hasComponents = (currentSLO?.slo_components.length ?? 0) > 0
+  const workspace = currentSLO?.workspace
   const workspaceItems =
-    slo?.items.filter(
+    currentSLO?.items.filter(
       (item) => item.kind === workspace?.kind && item.schema_version === workspace?.schema_version,
     ) ?? []
 
@@ -121,25 +133,32 @@ const TeamPage = () => {
         <TeamTitle>{decodedTeam} Dashboard</TeamTitle>
       </TeamHeader>
 
-      {hasEvaluations && slo && (
+      {sloError && <SLOError severity="error">{sloError}</SLOError>}
+      {sloLoading && !currentSLO && (
+        <SLOLoading>
+          <CircularProgress />
+        </SLOLoading>
+      )}
+      {hasEvaluations && currentSLO && (
         <TeamSLOStatus
           team={decodedTeam}
-          evaluations={slo.evaluations}
-          sloComponents={slo.slo_components}
+          evaluations={currentSLO.evaluations}
+          sloComponents={currentSLO.slo_components}
         />
       )}
       {hasComponents &&
-        slo?.slo_components.map((block) => (
+        currentSLO?.slo_components.map((block) => (
           <SLOComponentWell key={`${block.component}-${block.sub_component}`} block={block} />
         ))}
       {workspace &&
+        currentSLO &&
         renderTeamWorkspace({
           team: decodedTeam,
           workspace,
-          evaluations: slo?.evaluations ?? [],
+          evaluations: currentSLO.evaluations,
           items: workspaceItems,
           canEdit: isTeamSLOAdmin(decodedTeam),
-          onChanged: loadSLO,
+          onChanged: () => reloadSLO(true),
         })}
 
       <SectionTitle>Sub components</SectionTitle>

@@ -61,6 +61,16 @@ const ErrorText = styled('p')(({ theme }) => ({
   margin: theme.spacing(1, 0),
 }))
 
+const Fields = styled('fieldset')({
+  border: 0,
+  margin: 0,
+  padding: 0,
+  minWidth: 0,
+  '&:disabled': {
+    pointerEvents: 'none',
+  },
+})
+
 interface JobDraft {
   draftId: string
   name: string
@@ -98,6 +108,47 @@ const newJobDraft = (partial?: Partial<JobDraft>): JobDraft => {
 }
 
 const emptyLink = (): LinkDraft => ({ url: '', link_type: 'jira' })
+
+interface LinkPair {
+  index: number
+  draft: LinkDraft
+  keep?: SLOItemLink
+}
+
+const pairDesiredLinks = (drafts: LinkDraft[], baseline: SLOItemLink[]): LinkPair[] => {
+  const used = new Set<number>()
+  const pairs: LinkPair[] = []
+  drafts.forEach((draft, index) => {
+    const url = draft.url.trim()
+    if (url === '') {
+      return
+    }
+    const desired: LinkDraft = { ...draft, url }
+    const byId =
+      desired.id != null
+        ? baseline.find((item) => item.ID === desired.id && !used.has(item.ID))
+        : undefined
+    if (byId && byId.url === desired.url && byId.link_type === desired.link_type) {
+      used.add(byId.ID)
+      pairs.push({ index, draft: desired, keep: byId })
+      return
+    }
+    const byValue = baseline.find(
+      (item) =>
+        !used.has(item.ID) &&
+        item.ID !== byId?.ID &&
+        item.url === desired.url &&
+        item.link_type === desired.link_type,
+    )
+    if (byValue) {
+      used.add(byValue.ID)
+      pairs.push({ index, draft: desired, keep: byValue })
+      return
+    }
+    pairs.push({ index, draft: desired })
+  })
+  return pairs
+}
 
 const initialLinks = (item?: SLOItem): LinkDraft[] => {
   const existing = (item ? item.links : []).map((link) => ({
@@ -149,19 +200,24 @@ const UpsertPayloadItemDialog = ({
   }
 
   const syncLinks = async (saved: SLOItem) => {
-    const original = item ? item.links : []
-    const desired = links
-      .map((link) => ({ ...link, url: link.url.trim() }))
-      .filter((link) => link.url !== '')
+    let baseline = [...(saved.links ?? [])]
+    const pairs = pairDesiredLinks(links, baseline)
+    const nextLinks = links.map((link) => ({ ...link }))
+    for (const pair of pairs) {
+      if (!pair.keep) {
+        continue
+      }
+      nextLinks[pair.index] = {
+        ...nextLinks[pair.index],
+        id: pair.keep.ID,
+        url: pair.draft.url,
+        link_type: pair.draft.link_type,
+      }
+    }
 
-    for (const existing of original) {
-      const kept = desired.some(
-        (link) =>
-          link.id === existing.ID &&
-          link.url === existing.url &&
-          link.link_type === existing.link_type,
-      )
-      if (kept) {
+    const keptIds = new Set(pairs.flatMap((pair) => (pair.keep ? [pair.keep.ID] : [])))
+    for (const existing of baseline) {
+      if (keptIds.has(existing.ID)) {
         continue
       }
       const response = await fetch(
@@ -169,32 +225,38 @@ const UpsertPayloadItemDialog = ({
         { method: 'DELETE', credentials: 'include' },
       )
       if (!response.ok && response.status !== 404) {
+        setLinks(nextLinks)
         setError(await readError(response, `Link delete failed (${response.status})`))
         return false
       }
+      baseline = baseline.filter((link) => link.ID !== existing.ID)
     }
 
-    for (const link of desired) {
-      const unchanged = original.some(
-        (existing) =>
-          existing.ID === link.id &&
-          existing.url === link.url &&
-          existing.link_type === link.link_type,
-      )
-      if (unchanged) {
+    for (const pair of pairs) {
+      if (pair.keep) {
         continue
       }
       const response = await fetch(putSLOItemLinkEndpoint(team, saved.kind, saved.item_key), {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: link.url, link_type: link.link_type }),
+        body: JSON.stringify({ url: pair.draft.url, link_type: pair.draft.link_type }),
       })
       if (!response.ok) {
+        setLinks(nextLinks)
         setError(await readError(response, `Link failed (${response.status})`))
         return false
       }
+      const created = (await response.json()) as SLOItemLink
+      nextLinks[pair.index] = {
+        ...nextLinks[pair.index],
+        id: created.ID,
+        url: pair.draft.url,
+        link_type: pair.draft.link_type,
+      }
+      baseline = [...baseline, created]
     }
+    setLinks(nextLinks)
     return true
   }
 
@@ -255,163 +317,173 @@ const UpsertPayloadItemDialog = ({
     }
   }
 
+  const handleClose = () => {
+    if (!saving) {
+      onClose()
+    }
+  }
+
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
       <DialogTitle>{editing ? 'Edit payload' : 'Add payload'}</DialogTitle>
       <Content>
-        <Section>
-          <SectionTitle>Payload</SectionTitle>
-          <Field
-            select
-            fullWidth
-            label="Stream"
-            value={stream}
-            disabled={editing}
-            onChange={(event) => setStream(event.target.value)}
-          >
-            {streams.map((name) => (
-              <MenuItem key={name} value={name}>
-                {name}
-              </MenuItem>
+        <Fields disabled={saving}>
+          <Section>
+            <SectionTitle>Payload</SectionTitle>
+            <Field
+              select
+              fullWidth
+              label="Stream"
+              value={stream}
+              disabled={editing}
+              onChange={(event) => setStream(event.target.value)}
+            >
+              {streams.map((name) => (
+                <MenuItem key={name} value={name}>
+                  {name}
+                </MenuItem>
+              ))}
+            </Field>
+            <Field
+              fullWidth
+              label="Tag"
+              value={tag}
+              disabled={editing}
+              onChange={(event) => setTag(event.target.value)}
+            />
+            <Field
+              fullWidth
+              label="Occurred at"
+              type="datetime-local"
+              value={occurredAt}
+              onChange={(event) => setOccurredAt(event.target.value)}
+              slotProps={{ inputLabel: { shrink: true } }}
+            />
+            <Field
+              select
+              fullWidth
+              label="Phase"
+              value={outcome}
+              onChange={(event) => setOutcome(event.target.value)}
+            >
+              {['Accepted', 'Rejected', 'Ready'].map((value) => (
+                <MenuItem key={value} value={value}>
+                  {value}
+                </MenuItem>
+              ))}
+            </Field>
+            <Field
+              fullWidth
+              label="Release controller URL"
+              value={payloadURL}
+              onChange={(event) => setPayloadURL(event.target.value)}
+            />
+            <Field
+              fullWidth
+              label="Payload agent URL"
+              value={analysisURL}
+              onChange={(event) => setAnalysisURL(event.target.value)}
+            />
+            <Field
+              fullWidth
+              label="Payload notes"
+              value={notes}
+              multiline
+              onChange={(event) => setNotes(event.target.value)}
+            />
+          </Section>
+          <Section>
+            <SectionTitle>Failed jobs</SectionTitle>
+            {jobs.map((job, index) => (
+              <Entry key={job.draftId}>
+                <Field
+                  fullWidth
+                  label="Job name"
+                  value={job.name}
+                  onChange={(event) => updateJob(index, { name: event.target.value })}
+                />
+                <Field
+                  fullWidth
+                  label="Job URL"
+                  value={job.url}
+                  onChange={(event) => updateJob(index, { url: event.target.value })}
+                />
+                <Field
+                  fullWidth
+                  label="Job notes"
+                  value={job.notes}
+                  onChange={(event) => updateJob(index, { notes: event.target.value })}
+                />
+                <EntryActions>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    onClick={() => setJobs((current) => current.filter((_, i) => i !== index))}
+                  >
+                    Remove job
+                  </Button>
+                </EntryActions>
+              </Entry>
             ))}
-          </Field>
-          <Field
-            fullWidth
-            label="Tag"
-            value={tag}
-            disabled={editing}
-            onChange={(event) => setTag(event.target.value)}
-          />
-          <Field
-            fullWidth
-            label="Occurred at"
-            type="datetime-local"
-            value={occurredAt}
-            onChange={(event) => setOccurredAt(event.target.value)}
-            slotProps={{ inputLabel: { shrink: true } }}
-          />
-          <Field
-            select
-            fullWidth
-            label="Phase"
-            value={outcome}
-            onChange={(event) => setOutcome(event.target.value)}
-          >
-            {['Accepted', 'Rejected', 'Ready'].map((value) => (
-              <MenuItem key={value} value={value}>
-                {value}
-              </MenuItem>
+            <Button
+              variant="outlined"
+              color="primary"
+              onClick={() => setJobs((current) => [...current, newJobDraft()])}
+            >
+              Add job
+            </Button>
+          </Section>
+          <Section>
+            <SectionTitle>Links</SectionTitle>
+            {links.map((link, index) => (
+              <Entry key={link.id ?? `new-${index}`}>
+                <Field
+                  fullWidth
+                  label="Link URL"
+                  value={link.url}
+                  onChange={(event) => updateLink(index, { url: event.target.value })}
+                />
+                <Field
+                  select
+                  fullWidth
+                  label="Link type"
+                  value={link.link_type}
+                  onChange={(event) =>
+                    updateLink(index, { link_type: event.target.value as LinkDraft['link_type'] })
+                  }
+                >
+                  {(['jira', 'outage', 'other'] as const).map((value) => (
+                    <MenuItem key={value} value={value}>
+                      {value}
+                    </MenuItem>
+                  ))}
+                </Field>
+                <EntryActions>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    onClick={() => setLinks((current) => current.filter((_, i) => i !== index))}
+                  >
+                    Remove link
+                  </Button>
+                </EntryActions>
+              </Entry>
             ))}
-          </Field>
-          <Field
-            fullWidth
-            label="Release controller URL"
-            value={payloadURL}
-            onChange={(event) => setPayloadURL(event.target.value)}
-          />
-          <Field
-            fullWidth
-            label="Payload agent URL"
-            value={analysisURL}
-            onChange={(event) => setAnalysisURL(event.target.value)}
-          />
-          <Field
-            fullWidth
-            label="Payload notes"
-            value={notes}
-            multiline
-            onChange={(event) => setNotes(event.target.value)}
-          />
-        </Section>
-        <Section>
-          <SectionTitle>Failed jobs</SectionTitle>
-          {jobs.map((job, index) => (
-            <Entry key={job.draftId}>
-              <Field
-                fullWidth
-                label="Job name"
-                value={job.name}
-                onChange={(event) => updateJob(index, { name: event.target.value })}
-              />
-              <Field
-                fullWidth
-                label="Job URL"
-                value={job.url}
-                onChange={(event) => updateJob(index, { url: event.target.value })}
-              />
-              <Field
-                fullWidth
-                label="Job notes"
-                value={job.notes}
-                onChange={(event) => updateJob(index, { notes: event.target.value })}
-              />
-              <EntryActions>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  onClick={() => setJobs((current) => current.filter((_, i) => i !== index))}
-                >
-                  Remove job
-                </Button>
-              </EntryActions>
-            </Entry>
-          ))}
-          <Button
-            variant="outlined"
-            color="primary"
-            onClick={() => setJobs((current) => [...current, newJobDraft()])}
-          >
-            Add job
-          </Button>
-        </Section>
-        <Section>
-          <SectionTitle>Links</SectionTitle>
-          {links.map((link, index) => (
-            <Entry key={link.id ?? `new-${index}`}>
-              <Field
-                fullWidth
-                label="Link URL"
-                value={link.url}
-                onChange={(event) => updateLink(index, { url: event.target.value })}
-              />
-              <Field
-                select
-                fullWidth
-                label="Link type"
-                value={link.link_type}
-                onChange={(event) =>
-                  updateLink(index, { link_type: event.target.value as LinkDraft['link_type'] })
-                }
-              >
-                {(['jira', 'outage', 'other'] as const).map((value) => (
-                  <MenuItem key={value} value={value}>
-                    {value}
-                  </MenuItem>
-                ))}
-              </Field>
-              <EntryActions>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  onClick={() => setLinks((current) => current.filter((_, i) => i !== index))}
-                >
-                  Remove link
-                </Button>
-              </EntryActions>
-            </Entry>
-          ))}
-          <Button
-            variant="outlined"
-            color="primary"
-            onClick={() => setLinks((current) => [...current, emptyLink()])}
-          >
-            Add link
-          </Button>
-        </Section>
+            <Button
+              variant="outlined"
+              color="primary"
+              onClick={() => setLinks((current) => [...current, emptyLink()])}
+            >
+              Add link
+            </Button>
+          </Section>
+        </Fields>
         {error && <ErrorText>{error}</ErrorText>}
       </Content>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={handleClose} disabled={saving}>
+          Cancel
+        </Button>
         <Button
           variant="contained"
           disabled={saving || !tag.trim() || !payloadURL.trim() || occurredAt.trim() === ''}

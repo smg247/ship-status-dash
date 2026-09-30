@@ -64,7 +64,7 @@ local_deployed_file_hashes:
   .claude/commands/ship-status-dev-app.md: sha256:399489e7f0c49d44a4e5be73ab27c948c0127c799c4c5d8e29699d30c0e4369e
   .claude/commands/ship-status-dev-bdd.md: sha256:bc2300bae01412086d0486958dd90e3e898a11090fcfd40910029c969c8525e2
   .claude/commands/ship-status-dev-e2e.md: sha256:78f1ad93a91934b5f9979e4919d26a3dab21a66a03ece542a7676e19c1b602a2
-  .claude/commands/ship-status-dev-frontend.md: sha256:aeb873545eba135332f12f6115c6b6c0a3c8279fdf3a9a15b6ee112480d172d9
+  .claude/commands/ship-status-dev-frontend.md: sha256:fb10f7dfcb9c8a16733cb7ea429282e1e8ba4e83cd908ac63a1d75bf25b7f229
   .claude/commands/ship-status-dev-lint.md: sha256:c808f3e457941b90e564553fda8435ad8f87bdbc87d4523a03d0b8ef189e40e7
   .claude/commands/ship-status-dev-migrate.md: sha256:636507ec2efa52bcd48ba6c826dd78a4dc2bdeff479f5cea8e9ef07162010314
   .claude/commands/ship-status-dev-prettier.md: sha256:e1be3c6c942a184385a52d932ee69d46b3ee7303ef1aede2f16068026a41719b
@@ -83,7 +83,7 @@ local_deployed_file_hashes:
   .cursor/commands/ship-status-dev-app.md: sha256:399489e7f0c49d44a4e5be73ab27c948c0127c799c4c5d8e29699d30c0e4369e
   .cursor/commands/ship-status-dev-bdd.md: sha256:bc2300bae01412086d0486958dd90e3e898a11090fcfd40910029c969c8525e2
   .cursor/commands/ship-status-dev-e2e.md: sha256:78f1ad93a91934b5f9979e4919d26a3dab21a66a03ece542a7676e19c1b602a2
-  .cursor/commands/ship-status-dev-frontend.md: sha256:aeb873545eba135332f12f6115c6b6c0a3c8279fdf3a9a15b6ee112480d172d9
+  .cursor/commands/ship-status-dev-frontend.md: sha256:fb10f7dfcb9c8a16733cb7ea429282e1e8ba4e83cd908ac63a1d75bf25b7f229
   .cursor/commands/ship-status-dev-lint.md: sha256:c808f3e457941b90e564553fda8435ad8f87bdbc87d4523a03d0b8ef189e40e7
   .cursor/commands/ship-status-dev-migrate.md: sha256:636507ec2efa52bcd48ba6c826dd78a4dc2bdeff479f5cea8e9ef07162010314
   .cursor/commands/ship-status-dev-prettier.md: sha256:e1be3c6c942a184385a52d932ee69d46b3ee7303ef1aede2f16068026a41719b
@@ -102,7 +102,7 @@ local_deployed_file_hashes:
   .gemini/commands/ship-status-dev-app.toml: sha256:9699fca0ca9b16dba0c9563ba4a65d4f04ce5ca07ca9b88bf1d7e0bb666184d7
   .gemini/commands/ship-status-dev-bdd.toml: sha256:673922c7941aecbd2370032caad15bc8b16e5febed57f22f8101e0f4c0b99663
   .gemini/commands/ship-status-dev-e2e.toml: sha256:b101d8a4b13b84cc140ff642f8442dc32a6728227271b5adaf49054389cddb00
-  .gemini/commands/ship-status-dev-frontend.toml: sha256:54a76f3bc6b15837e7859e97997e6bc3eb31d746ecefae29b8df60db6133fbba
+  .gemini/commands/ship-status-dev-frontend.toml: sha256:e8ca6ba30bcb88fe2e3edfef22b7c54d24d83f5501bd51778c6bb06b2497bc4d
   .gemini/commands/ship-status-dev-lint.toml: sha256:11b98a8799556c6a0d98aa492f672f680f170bf1c9fb7d0dffcb72ad139eff16
   .gemini/commands/ship-status-dev-migrate.toml: sha256:1ee5aab78291727c1f113563fd18515c5e1734fe85a0877cd5906cdc0b96e2ab
   .gemini/commands/ship-status-dev-prettier.toml: sha256:1b6ba798dbf8e0726375bacd904100d86b6c807a4e72876e9c4b2fc8f21ec615
@@ -112,7 +112,7 @@ local_deployed_file_hashes:
   .opencode/commands/ship-status-dev-app.md: sha256:399489e7f0c49d44a4e5be73ab27c948c0127c799c4c5d8e29699d30c0e4369e
   .opencode/commands/ship-status-dev-bdd.md: sha256:bc2300bae01412086d0486958dd90e3e898a11090fcfd40910029c969c8525e2
   .opencode/commands/ship-status-dev-e2e.md: sha256:78f1ad93a91934b5f9979e4919d26a3dab21a66a03ece542a7676e19c1b602a2
-  .opencode/commands/ship-status-dev-frontend.md: sha256:aeb873545eba135332f12f6115c6b6c0a3c8279fdf3a9a15b6ee112480d172d9
+  .opencode/commands/ship-status-dev-frontend.md: sha256:fb10f7dfcb9c8a16733cb7ea429282e1e8ba4e83cd908ac63a1d75bf25b7f229
   .opencode/commands/ship-status-dev-lint.md: sha256:c808f3e457941b90e564553fda8435ad8f87bdbc87d4523a03d0b8ef189e40e7
   .opencode/commands/ship-status-dev-migrate.md: sha256:636507ec2efa52bcd48ba6c826dd78a4dc2bdeff479f5cea8e9ef07162010314
   .opencode/commands/ship-status-dev-prettier.md: sha256:e1be3c6c942a184385a52d932ee69d46b3ee7303ef1aede2f16068026a41719b
