@@ -186,6 +186,54 @@ def _register_write_tools(server: FastMCP, api: ShipStatusAPI) -> None:
             component_slug, sub_component_slug, outage_id, relationship_id, acting_for=acting_for,
         )
 
+    @server.tool()
+    def upsert_slo_item(
+        team: str,
+        kind: str,
+        schema_version: int,
+        item_key: str,
+        group_key: str,
+        occurred_at: str,
+        outcome: str,
+        details: dict,
+        acting_for: str = "",
+        notes: str = "",
+    ) -> dict:
+        """Create or replace one SLO workspace item. acting_for is required. schema_version must match a schema this dashboard accepts. Does not create an outage."""
+        return api.upsert_slo_item(
+            team,
+            kind,
+            schema_version,
+            item_key,
+            group_key,
+            occurred_at,
+            outcome,
+            details,
+            notes=notes,
+            acting_for=acting_for,
+        )
+
+    @server.tool()
+    def add_slo_item_link(
+        team: str,
+        kind: str,
+        item_key: str,
+        url: str,
+        acting_for: str = "",
+        link_type: str = "other",
+        outage_id: int | None = None,
+    ) -> dict:
+        """Attach a jira, outage, or other link to an SLO workspace item. acting_for is required. Does not create an outage."""
+        return api.add_slo_item_link(
+            team,
+            kind,
+            item_key,
+            url,
+            link_type=link_type,
+            outage_id=outage_id,
+            acting_for=acting_for,
+        )
+
 
 def build_server() -> FastMCP:
     """Build the authenticated (write) MCP server."""

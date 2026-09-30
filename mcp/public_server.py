@@ -72,6 +72,16 @@ def _register_read_tools(server: FastMCP, api: ShipStatusAPI) -> None:
         """All sub-components across components. Optional status filter: comma-separated values (Healthy, Degraded, Down, CapacityExhausted, Suspected). Partial is not valid for this filter. When set, only matching items are returned. Each item includes a status field."""
         return api.list_sub_components(status=status)
 
+    @server.tool()
+    def get_team_slo(team: str) -> dict:
+        """Team SLO evaluations, watched streams, schema version, stored item keys, and recent workspace items."""
+        return api.get_team_slo(team)
+
+    @server.tool()
+    def get_team_slo_summary() -> dict:
+        """Per-team SLO roll-up and compact slo_component outages for the home page. No workspace item lists."""
+        return api.get_team_slo_summary()
+
 
 def build_server() -> FastMCP:
     """Build the public (read-only) MCP server."""

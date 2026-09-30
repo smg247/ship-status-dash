@@ -31,6 +31,36 @@ Write endpoints support delegated authorization via the `X-Acting-For` HTTP head
 - **GET** `/api/sub-components` - List sub-components; optional query parameters `componentName`, `tag`, `team`, and `status`. Filters combine with AND across parameter names (`componentName`, `tag`, `team`, and `status`). Within `status`, multiple values are matched with OR: `status` may be repeated and/or comma-separated (e.g. `status=Down&status=Degraded` or `status=Down,Degraded`) and returns sub-components matching any listed status. Valid `status` values are `Healthy`, `Degraded`, `Down`, `CapacityExhausted`, and `Suspected` (`Partial` is component-level only and is rejected). Each returned item includes a `status` field with the sub-component's current status.
   - **Public:** Yes
 
+### Team SLOs
+
+- **GET** `/api/teams/slo-summary` - Home-page roll-up. One block per `team_slos` entry. Evaluations and compact active outages for components listed in that entry's `slo_components`. No workspace item lists.
+  - **Public:** Yes
+
+- **GET** `/api/teams/{team}/slo` - Team page SLO: evaluations, active outages for components listed in `team_slos[].slo_components`, the last N workspace items, and `item_key` values retention keeps for watched streams. This read does not delete rows. The dashboard prunes expired TRT payload items on `--trt-payload-prune-interval` (default 5m).
+  - **Public:** Yes
+
+- **PUT** `/api/teams/{team}/slo/items` - Create or replace one workspace item (`kind`, `schema_version`, `item_key`, `group_key`, `occurred_at`, `outcome`, `details`, `notes`).
+  - **Public:** No
+  - **Authorization:** Caller must be an owner on that team's `team_slos` entry (`IsUserAuthorizedForTeamSLO`). Component owners are not consulted.
+  - Supports `X-Acting-For` header for delegated authorization
+
+- **DELETE** `/api/teams/{team}/slo/items/{kind}/{itemKey}` - Delete one workspace item.
+  - **Public:** No
+  - **Authorization:** Team SLO owner (`team_slos` entry only).
+  - Supports `X-Acting-For` header for delegated authorization
+
+- **PUT** `/api/teams/{team}/slo/items/{kind}/{itemKey}/links` - Attach a link (`url`, `link_type` of `jira`, `outage`, or `other`, optional `outage_id`).
+  - **Public:** No
+  - **Authorization:** Team SLO owner (`team_slos` entry only).
+  - Supports `X-Acting-For` header for delegated authorization
+
+- **DELETE** `/api/teams/{team}/slo/items/{kind}/{itemKey}/links/{linkId}` - Delete one workspace link.
+  - **Public:** No
+  - **Authorization:** Team SLO owner (`team_slos` entry only).
+  - Supports `X-Acting-For` header for delegated authorization
+
+`GET /api/components` and `GET /api/sub-components` omit components with `slo_component: true`. Those components appear in SLO wells only when their slug is listed on a `team_slos` entry. `GET /api/user` includes `team_slos`, the team names the caller may edit.
+
 ### Tags
 
 - **GET** `/api/tags` - Get the configured tag definitions
@@ -131,7 +161,7 @@ Write endpoints support delegated authorization via the `X-Acting-For` HTTP head
 
 ### User Information
 
-- **GET** `/api/user` - Get authenticated user information
+- **GET** `/api/user` - Get authenticated user information. Response fields: `username`, `components` (slugs the caller may administer), and `team_slos` (team names whose SLO workspace the caller may edit).
   - **Public:** No (requires authentication)
 
 ### Component Monitor Reports

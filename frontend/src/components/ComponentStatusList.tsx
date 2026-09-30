@@ -2,13 +2,18 @@ import { Alert, Box, CircularProgress, Container, styled, Typography } from '@mu
 import React, { useCallback, useEffect, useState } from 'react'
 
 import useIntervalRefresh from '../hooks/useIntervalRefresh'
-import type { Component } from '../types'
+import type { Component, TeamSLOSummary } from '../types'
 import { deferMountFetch } from '../utils/deferMountFetch'
-import { getComponentsEndpoint, getOverallStatusEndpoint } from '../utils/endpoints'
+import {
+  getComponentsEndpoint,
+  getOverallStatusEndpoint,
+  getTeamSLOSummaryEndpoint,
+} from '../utils/endpoints'
 import { slugify } from '../utils/slugify'
 
 import ComponentWell from './component/ComponentWell'
 import UnhealthyWell from './component/UnhealthyWell'
+import TeamSLOSummaryWell from './team/slo/TeamSLOSummaryWell'
 
 const StyledContainer = styled(Container)(({ theme }) => ({
   marginTop: theme.spacing(4),
@@ -70,6 +75,7 @@ const ComponentStatusList: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inOutage, setInOutage] = useState(false)
+  const [sloSummary, setSloSummary] = useState<TeamSLOSummary | null>(null)
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('theme')
     return saved === 'dark'
@@ -91,6 +97,11 @@ const ComponentStatusList: React.FC = () => {
   }, [])
 
   const fetchComponents = useCallback((silent: boolean) => {
+    fetch(getTeamSLOSummaryEndpoint())
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: TeamSLOSummary | null) => setSloSummary(data))
+      .catch(() => setSloSummary(null))
+
     Promise.all([
       fetch(getComponentsEndpoint()).then((res) => {
         if (!res.ok) throw new Error(`Failed to fetch components: HTTP ${res.status}`)
@@ -169,6 +180,8 @@ const ComponentStatusList: React.FC = () => {
       </TitleSection>
 
       <UnhealthyWell onHasOutagesChange={setInOutage} />
+
+      {sloSummary && sloSummary.teams.length > 0 && <TeamSLOSummaryWell summary={sloSummary} />}
 
       <ComponentsGrid data-tour="component-list">
         {components.map((component) => (

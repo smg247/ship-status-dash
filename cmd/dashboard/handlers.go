@@ -33,13 +33,14 @@ type Handlers struct {
 	pingRepo               repositories.ComponentPingRepository
 	triageNoteRepo         repositories.TriageNoteRepository
 	outageLinkRepo         repositories.OutageLinkRepository
+	sloRepo                repositories.SLOWorkspaceRepository
 	groupCache             auth.GroupMembershipProvider
 	monitorReportProcessor *ComponentMonitorReportProcessor
 	externalPageCaches     map[string]*ExternalPageCache
 }
 
 // NewHandlers creates a new Handlers instance with the provided dependencies.
-func NewHandlers(logger *logrus.Logger, configManager *config.Manager[types.DashboardConfig], outageManager outage.OutageManager, pingRepo repositories.ComponentPingRepository, triageNoteRepo repositories.TriageNoteRepository, outageLinkRepo repositories.OutageLinkRepository, groupCache auth.GroupMembershipProvider) *Handlers {
+func NewHandlers(logger *logrus.Logger, configManager *config.Manager[types.DashboardConfig], outageManager outage.OutageManager, pingRepo repositories.ComponentPingRepository, triageNoteRepo repositories.TriageNoteRepository, outageLinkRepo repositories.OutageLinkRepository, sloRepo repositories.SLOWorkspaceRepository, groupCache auth.GroupMembershipProvider) *Handlers {
 	return &Handlers{
 		logger:                 logger,
 		configManager:          configManager,
@@ -47,6 +48,7 @@ func NewHandlers(logger *logrus.Logger, configManager *config.Manager[types.Dash
 		pingRepo:               pingRepo,
 		triageNoteRepo:         triageNoteRepo,
 		outageLinkRepo:         outageLinkRepo,
+		sloRepo:                sloRepo,
 		groupCache:             groupCache,
 		monitorReportProcessor: NewComponentMonitorReportProcessor(outageManager, pingRepo, configManager, logger),
 		externalPageCaches: map[string]*ExternalPageCache{
@@ -79,8 +81,12 @@ func respondWithError(w http.ResponseWriter, statusCode int, message string) {
 // collectAuthorizedIdentities returns all identities authorized for a component:
 // Owner.User, Owner.ServiceAccount values, and expanded RoverGroup members.
 func (h *Handlers) collectAuthorizedIdentities(component *types.Component) []string {
+	return h.collectOwnerIdentities(component.Owners)
+}
+
+func (h *Handlers) collectOwnerIdentities(owners []types.Owner) []string {
 	identities := sets.NewString()
-	for _, owner := range component.Owners {
+	for _, owner := range owners {
 		if owner.User != "" {
 			identities.Insert(owner.User)
 		}
@@ -110,7 +116,15 @@ func (h *Handlers) HealthJSON(w http.ResponseWriter, r *http.Request) {
 
 // GetComponentsJSON returns the list of configured components.
 func (h *Handlers) GetComponentsJSON(w http.ResponseWriter, r *http.Request) {
-	respondWithJSON(w, http.StatusOK, h.config().Components)
+	components := h.config().Components
+	visible := make([]*types.Component, 0, len(components))
+	for _, component := range components {
+		if component.SLOComponent {
+			continue
+		}
+		visible = append(visible, component)
+	}
+	respondWithJSON(w, http.StatusOK, visible)
 }
 
 // GetComponentInfoJSON returns the information for a specific component.
@@ -1575,7 +1589,7 @@ func (h *Handlers) ListSubComponentsJSON(w http.ResponseWriter, r *http.Request)
 	items := make([]types.SubComponentListItem, 0, len(refs))
 	for _, ref := range refs {
 		component := h.config().GetComponentBySlug(ref.ComponentSlug)
-		if component == nil {
+		if component == nil || component.SLOComponent {
 			continue
 		}
 		sub := component.GetSubComponentBySlug(ref.SubSlug)
@@ -1784,6 +1798,7 @@ func (h *Handlers) PostComponentMonitorReportJSON(w http.ResponseWriter, r *http
 type AuthenticatedUser struct {
 	Username   string   `json:"username" yaml:"username"`
 	Components []string `json:"components" yaml:"components"`
+	TeamSLOs   []string `json:"team_slos" yaml:"team_slos"`
 }
 
 func (h *Handlers) GetAuthenticatedUserJSON(w http.ResponseWriter, r *http.Request) {
@@ -1796,12 +1811,18 @@ func (h *Handlers) GetAuthenticatedUserJSON(w http.ResponseWriter, r *http.Reque
 	response := AuthenticatedUser{
 		Username:   user,
 		Components: []string{},
+		TeamSLOs:   []string{},
 	}
 
 	// Return only components the user is authorized for
 	for _, component := range h.config().Components {
 		if h.IsUserAuthorizedForComponent(user, component) {
 			response.Components = append(response.Components, component.Slug)
+		}
+	}
+	for _, team := range h.config().TeamSLOs {
+		if h.IsUserAuthorizedForTeamSLO(user, team.Team) {
+			response.TeamSLOs = append(response.TeamSLOs, team.Team)
 		}
 	}
 

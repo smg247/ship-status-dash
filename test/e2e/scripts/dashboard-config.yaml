@@ -163,6 +163,7 @@ components:
   - name: TRT Incidents
     description: TRT Jira incidents labeled trt-incident
     ship_team: TRT
+    slo_component: true
     sub_components:
       - name: Incidents
         description: Currently open TRT incidents
@@ -201,3 +202,25 @@ tags:
     color: "#03A9F4"
 trusted_delegators:
   - "system:serviceaccount:ship-status:mcp-server"
+  - "system:serviceaccount:ship-status:chai-bot"
+team_slos:
+  - team: TRT
+    owners:
+      - user: chai-bot
+      - user: developer
+    slo_components:
+      - trt-incidents
+    slos:
+      - name: accepted-payload-per-day
+        display_name: 1 accepted payload per day
+        source: payload_acceptance
+        workspace:
+          kind: payload_streams
+          schema_version: 1
+          # 2 so e2e can tell the last-N page from the full item_keys list.
+          recent_payloads: 2
+          streams:
+            - controller: amd64
+              name: 5.1.0-0.nightly
+            - controller: amd64
+              name: 5.1.0-0.ci

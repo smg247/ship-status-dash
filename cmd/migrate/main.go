@@ -125,6 +125,14 @@ func main() {
 		log.WithField("error", err).Fatal("Failed to migrate OutageRelationship table")
 	}
 
+	if err = db.AutoMigrate(&types.SLOWorkspaceItem{}); err != nil {
+		log.WithField("error", err).Fatal("Failed to migrate SLOWorkspaceItem table")
+	}
+
+	if err = db.AutoMigrate(&types.SLOWorkspaceLink{}); err != nil {
+		log.WithField("error", err).Fatal("Failed to migrate SLOWorkspaceLink table")
+	}
+
 	db.Exec("DROP INDEX IF EXISTS idx_one_active_suspected_per_subcomponent")
 	if err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_suspected_per_subcomponent
 		ON outages (component_name, sub_component_name)

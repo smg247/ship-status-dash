@@ -70,8 +70,8 @@ See [SignatureHeaders](https://github.com/openshift/oauth-proxy/blob/master/oaut
 
 The MCP servers ([`mcp/`](../../mcp/)) expose dashboard REST API tools for AI agents. They run as sidecar containers in the dashboard pod. Each server is a separate entry point:
 
-- **Public MCP** (`public_server.py`, port 8090): Read-only tools for querying status, outages, and component discovery. No authentication required. Route: `mcp.ship-status.ci.openshift.org`.
-- **Authenticated MCP** (`auth_server.py`, port 8091): Write tools for creating, updating, and deleting outages, triage notes, and links. Requires authentication via oauth-proxy. Route: `protected-mcp.ship-status.ci.openshift.org`. Calls the dashboard's protected API using a mounted service account token (`SHIP_STATUS_AUTH_TOKEN_FILE`) and passes `X-Acting-For` header for delegated authorization.
+- **Public MCP** (`public_server.py`, port 8090): Read-only tools for querying status, outages, component discovery, and team SLOs (`get_team_slo`, `get_team_slo_summary`). No authentication required. Route: `mcp.ship-status.ci.openshift.org`.
+- **Authenticated MCP** (`auth_server.py`, port 8091): Write tools for outages, triage notes, links, and SLO workspace items (`upsert_slo_item`, `add_slo_item_link`). Requires authentication via oauth-proxy. Route: `protected-mcp.ship-status.ci.openshift.org`. Calls the dashboard's protected API using a mounted service account token (`SHIP_STATUS_AUTH_TOKEN_FILE`) and passes `X-Acting-For` header for delegated authorization. Team SLO writes still require the acting user to be an owner on that team's `team_slos` entry.
 
 OpenShift Deployment/Route changes are maintained in [openshift/release](https://github.com/openshift/release).
 

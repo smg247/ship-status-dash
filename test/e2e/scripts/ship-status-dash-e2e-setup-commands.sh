@@ -13,6 +13,7 @@ DSN="postgres://postgres:testpass@postgres.${NAMESPACE}.svc.cluster.local:5432/$
 echo "The dashboard CI image: ${DASHBOARD_IMAGE}"
 echo "The mock-oauth-proxy CI image: ${MOCK_OAUTH_PROXY_IMAGE}"
 echo "The migrate CI image: ${MIGRATE_IMAGE}"
+echo "The seed-slo CI image: ${SEED_SLO_IMAGE}"
 echo "The component-monitor CI image: ${COMPONENT_MONITOR_IMAGE}"
 echo "The mock-monitored-component CI image: ${MOCK_MONITORED_COMPONENT_IMAGE}"
 KUBECTL_CMD="${KUBECTL_CMD:=oc}"
@@ -252,6 +253,53 @@ if [ ${migrate_retVal} -ne 0 ]; then
   exit 1
 fi
 
+echo "Seeding SLO payloads..."
+cat << END | ${KUBECTL_CMD} apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-slo
+  namespace: ${NAMESPACE}
+spec:
+  template:
+    spec:
+      containers:
+      - name: seed-slo
+        image: ${SEED_SLO_IMAGE}
+        imagePullPolicy: Always
+        command: ["./seed-slo"]
+        args:
+          - "--dsn=${DSN}"
+          - "--config=/etc/config/config.yaml"
+        volumeMounts:
+        - mountPath: /etc/config
+          name: dashboard-config
+          readOnly: true
+      imagePullSecrets:
+      - name: regcred
+      volumes:
+      - name: dashboard-config
+        configMap:
+          name: ${TEST_DASHBOARD_CONFIG_PATH}
+      restartPolicy: Never
+  backoffLimit: 3
+END
+
+set +e
+${KUBECTL_CMD} -n ${NAMESPACE} wait --for=condition=complete job/seed-slo --timeout=120s
+seed_retVal=$?
+set -e
+
+seed_pod=$(${KUBECTL_CMD} -n ${NAMESPACE} get pod --selector=job-name=seed-slo --output=jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [ ! -z "$seed_pod" ]; then
+  ${KUBECTL_CMD} -n ${NAMESPACE} logs ${seed_pod} > ${ARTIFACT_DIR}/seed-slo.log || true
+fi
+
+if [ ${seed_retVal} -ne 0 ]; then
+  echo "SLO seed failed"
+  exit 1
+fi
+
 echo "Starting dashboard..."
 cat << END | ${KUBECTL_CMD} apply -f -
 apiVersion: v1
@@ -275,6 +323,7 @@ spec:
       - "--dsn=${DSN}"
       - "--hmac-secret-file=/etc/hmac/secret"
       - "--absent-report-check-interval=15s"
+      - "--trt-payload-prune-interval=15s"
       - "--config-update-poll-interval=10s"
       - "--slack-base-url=http://localhost:3030"
       - "--slack-workspace-url=https://rhsandbox.slack.com/"

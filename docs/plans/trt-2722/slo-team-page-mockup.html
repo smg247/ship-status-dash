@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mock: Team TRT SLO page</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --team: #ba68c8;
+        --paper: #fff;
+        --bg: #fafafa;
+        --text: rgba(0, 0, 0, 0.87);
+        --muted: rgba(0, 0, 0, 0.6);
+        --divider: rgba(0, 0, 0, 0.12);
+        --healthy: #2e7d32;
+        --degraded: #ed6c02;
+        --down: #d32f2f;
+        --radius: 16px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      header.appbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: var(--paper);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 24px;
+        height: 64px;
+      }
+      header.appbar .logo {
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        color: var(--text);
+      }
+      header.appbar .icons {
+        display: flex;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .mock-banner {
+        background: #fff8e1;
+        border-bottom: 1px solid #ffe082;
+        color: #6d4c41;
+        font-size: 13px;
+        padding: 8px 24px;
+        text-align: center;
+      }
+      main {
+        max-width: 1200px;
+        margin: 32px auto 64px;
+        padding: 0 24px;
+      }
+      .back {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--divider);
+        background: transparent;
+        border-radius: 4px;
+        padding: 6px 16px;
+        font: inherit;
+        color: var(--text);
+        margin-bottom: 24px;
+      }
+      .team-header {
+        background: #ba68c815;
+        border: 2px solid #ba68c840;
+        border-radius: var(--radius);
+        padding: 32px;
+        margin-bottom: 32px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
+      }
+      .team-header h1 {
+        margin: 0;
+        font-size: 2rem;
+        font-weight: 600;
+      }
+      .section {
+        background: var(--paper);
+        border-radius: var(--radius);
+        padding: 24px;
+        margin-bottom: 24px;
+        border: 1px solid var(--divider);
+      }
+      .section h2 {
+        margin: 0 0 4px;
+        font-size: 1.25rem;
+        font-weight: 600;
+      }
+      .section .sub {
+        color: var(--muted);
+        font-size: 0.875rem;
+        margin-bottom: 16px;
+      }
+      .mock-caption {
+        margin: 4px 0 16px;
+        padding: 6px 10px;
+        background: #fff8e1;
+        border-left: 3px solid #ffe082;
+        color: #6d4c41;
+        font-size: 12px;
+        font-style: italic;
+        line-height: 1.4;
+      }
+      .mock-caption::before {
+        content: "Mock caption: ";
+        font-style: normal;
+        font-weight: 600;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 16px;
+        padding: 4px 12px;
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1.4;
+      }
+      .chip.ok {
+        background: var(--healthy);
+        color: #fff;
+      }
+      .chip.warn {
+        background: var(--degraded);
+        color: #fff;
+      }
+      .chip.err {
+        background: var(--down);
+        color: #fff;
+      }
+      .chip.outline {
+        background: transparent;
+        border: 1px solid currentColor;
+      }
+      .chip.muted {
+        background: #eee;
+        color: var(--text);
+      }
+      .slo-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-top: 8px;
+      }
+      .metric {
+        border: 1px solid var(--divider);
+        border-radius: 8px;
+        padding: 16px;
+      }
+      .metric .label {
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .metric .value {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-top: 4px;
+      }
+      .incident {
+        border: 1px solid var(--divider);
+        border-left: 4px solid var(--degraded);
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 12px;
+      }
+      .incident:last-child {
+        margin-bottom: 0;
+      }
+      .incident h3 {
+        margin: 0 0 6px;
+        font-size: 1rem;
+      }
+      .incident p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.875rem;
+      }
+      .links {
+        margin-top: 8px;
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        font-size: 0.8125rem;
+      }
+      .links a {
+        color: #1976d2;
+        text-decoration: none;
+      }
+      .stream {
+        border: 1px solid var(--divider);
+        border-radius: 8px;
+        margin-bottom: 16px;
+        overflow: hidden;
+      }
+      .stream-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        background: #f5f5f5;
+        flex-wrap: wrap;
+      }
+      .stream-head strong {
+        font-size: 0.95rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 10px 16px;
+        border-top: 1px solid var(--divider);
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 500;
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+      .jobs {
+        margin: 0;
+        padding-left: 16px;
+      }
+      .jobs li {
+        margin: 4px 0;
+      }
+      .jobs a {
+        color: #1976d2;
+        text-decoration: none;
+      }
+      .job-note {
+        color: var(--muted);
+        font-size: 12px;
+        font-style: italic;
+        margin-top: 2px;
+      }
+      .payload-cell a {
+        color: #1976d2;
+        text-decoration: none;
+      }
+      .payload-cell .tag {
+        font-weight: 500;
+        display: block;
+        color: var(--text);
+      }
+      .payload-cell .sublinks {
+        margin-top: 4px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        font-size: 12px;
+      }
+      .btn {
+        border: 1px solid var(--divider);
+        background: var(--paper);
+        border-radius: 4px;
+        padding: 4px 10px;
+        font: inherit;
+        font-size: 13px;
+        cursor: default;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 24px;
+      }
+      .card {
+        background: var(--paper);
+        border-radius: 12px;
+        min-height: 160px;
+        padding: 20px;
+        border: 1px solid var(--divider);
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--healthy);
+        opacity: 0.05;
+        pointer-events: none;
+      }
+      .card > * {
+        position: relative;
+      }
+      .card-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .card h3 {
+        margin: 0;
+        font-size: 1rem;
+      }
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.875rem;
+        flex: 1;
+      }
+      .card-foot {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--divider);
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="appbar">
+      <div class="logo">SHIP Status</div>
+      <div class="icons">theme · help · GitHub · sign in</div>
+    </header>
+    <div class="mock-banner">
+      Static mockup for TRT-2722. Not the live dashboard. Italic yellow
+      <strong>Mock caption</strong> lines are annotations for this screenshot, not UI copy.
+      Based on
+      <a href="https://ship-status.ci.openshift.org/team/TRT">/team/TRT</a>
+      as of 2026-09-25.
+    </div>
+    <main>
+      <button class="back" type="button">← Main Dashboard</button>
+
+      <div class="team-header">
+        <h1>TRT</h1>
+      </div>
+
+      <section class="section" id="slo">
+        <h2>TRT SLOs</h2>
+        <p class="mock-caption">Evaluated from stored payload upserts. A miss is status only. It does not create an outage or light the ship.</p>
+        <div class="slo-metrics">
+          <div class="metric">
+            <div class="label">1 accepted payload / 24h</div>
+            <div class="value">3 of 4</div>
+            <div class="row" style="margin-top: 8px">
+              <span class="chip warn">Missed</span>
+            </div>
+          </div>
+          <div class="metric">
+            <div class="label">Worst miss</div>
+            <div class="value" style="font-size: 1.1rem">5.0 nightly</div>
+            <p class="sub" style="margin: 4px 0 0">Last accepted 32h ago</p>
+          </div>
+          <div class="metric">
+            <div class="label">Open incidents</div>
+            <div class="value">2</div>
+            <p class="sub" style="margin: 4px 0 0"><a href="#slo-component-trt-incidents">Jump to TRT Incidents</a></p>
+          </div>
+        </div>
+        <div class="row" style="margin-top: 16px">
+          <span class="chip ok">5.1.0-0.nightly · 6h</span>
+          <span class="chip ok">5.1.0-0.ci · 4h</span>
+          <span class="chip warn">5.0.0-0.nightly · 32h</span>
+          <span class="chip ok">5.0.0-0.ci · 8h</span>
+        </div>
+      </section>
+
+      <section class="section" id="slo-component-trt-incidents">
+        <h2>TRT Incidents</h2>
+        <p class="mock-caption">
+          Generic SLO-component well. Title is the configured component name. TRT's is TRT Incidents. Other teams may omit this section or name it something else.
+        </p>
+        <div class="incident">
+          <div class="row" style="margin-bottom: 8px">
+            <span class="chip warn">Degraded</span>
+            <span class="chip muted">jira</span>
+          </div>
+          <h3>aws-ovn-upgrade blocking 5.1 nightlies</h3>
+          <p>Opened 14h ago · discovered by component-monitor</p>
+          <div class="links">
+            <a href="#">TRT-4120</a>
+            <a href="#">Outage details</a>
+            <a href="#stream-5.1-nightly">3 related payloads</a>
+          </div>
+        </div>
+        <div class="incident">
+          <div class="row" style="margin-bottom: 8px">
+            <span class="chip warn">Degraded</span>
+            <span class="chip muted">jira</span>
+          </div>
+          <h3>upgrade disruption on metal serial</h3>
+          <p>Opened 2d ago · discovered by component-monitor</p>
+          <div class="links">
+            <a href="#">TRT-4108</a>
+            <a href="#">Outage details</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="row" style="justify-content: space-between">
+          <div>
+            <h2>Payload streams (amd64)</h2>
+            <p class="mock-caption">Last 5 terminal payloads per stream. Each row links to release-controller. Rejected rows also link to payload-agent analysis. Failed jobs can carry notes. Add and per-row Edit are for signed-in owners. Rare. Prefer asking Chai in Slack.</p>
+          </div>
+          <div class="actions">
+            <button class="btn" type="button">Add payload</button>
+          </div>
+        </div>
+
+        <div class="stream" id="stream-5.1-nightly">
+          <div class="stream-head">
+            <strong>5.1.0-0.nightly</strong>
+            <span class="chip ok">SLO met · last accepted 6h ago</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Payload</th>
+                <th>Phase</th>
+                <th>Failed blocking jobs</th>
+                <th>Linked</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="payload-cell">
+                  <span class="tag">5.1.0-0.nightly-2026-09-25-060000</span>
+                  <div class="sublinks"><a href="#">Release controller</a></div>
+                </td>
+                <td><span class="chip ok">Accepted</span></td>
+                <td>-</td>
+                <td></td>
+                <td><button class="btn" type="button">Edit</button></td>
+              </tr>
+              <tr>
+                <td class="payload-cell">
+                  <span class="tag">5.1.0-0.nightly-2026-09-24-180000</span>
+                  <div class="sublinks">
+                    <a href="#">Release controller</a>
+                    <a href="#">Payload agent</a>
+                  </div>
+                </td>
+                <td><span class="chip err">Rejected</span></td>
+                <td>
+                  <ul class="jobs">
+                    <li>
+                      <a href="#">e2e-aws-ovn-upgrade</a> <span class="chip warn">Recurring 3x</span>
+                      <div class="job-note">Same disruption as TRT-4120. Not infra.</div>
+                    </li>
+                    <li>
+                      <a href="#">e2e-metal-ipi-ovn-serial</a>
+                      <div class="job-note">Likely flake. Watching next payload.</div>
+                    </li>
+                  </ul>
+                </td>
+                <td>
+                  <div class="links">
+                    <a href="#">TRT-4120</a>
+                    <a href="#">Build02 outage</a>
+                  </div>
+                </td>
+                <td><button class="btn" type="button">Edit</button></td>
+              </tr>
+              <tr>
+                <td class="payload-cell">
+                  <span class="tag">5.1.0-0.nightly-2026-09-24-060000</span>
+                  <div class="sublinks">
+                    <a href="#">Release controller</a>
+                    <a href="#">Payload agent</a>
+                  </div>
+                </td>
+                <td><span class="chip err">Rejected</span></td>
+                <td>
+                  <ul class="jobs">
+                    <li>
+                      <a href="#">e2e-aws-ovn-upgrade</a> <span class="chip warn">Recurring 3x</span>
+                      <div class="job-note">Same disruption as TRT-4120. Not infra.</div>
+                    </li>
+                  </ul>
+                </td>
+                <td>
+                  <div class="links"><a href="#">TRT-4120</a></div>
+                </td>
+                <td><button class="btn" type="button">Edit</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="stream" id="stream-5.1-ci">
+          <div class="stream-head">
+            <strong>5.1.0-0.ci</strong>
+            <span class="chip ok">SLO met · last accepted 4h ago</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Payload</th>
+                <th>Phase</th>
+                <th>Failed blocking jobs</th>
+                <th>Linked</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="payload-cell">
+                  <span class="tag">5.1.0-0.ci-2026-09-25-090000</span>
+                  <div class="sublinks"><a href="#">Release controller</a></div>
+                </td>
+                <td><span class="chip ok">Accepted</span></td>
+                <td>-</td>
+                <td></td>
+                <td><button class="btn" type="button">Edit</button></td>
+              </tr>
+              <tr>
+                <td class="payload-cell">
+                  <span class="tag">5.1.0-0.ci-2026-09-24-210000</span>
+                  <div class="sublinks">
+                    <a href="#">Release controller</a>
+                    <a href="#">Payload agent</a>
+                  </div>
+                </td>
+                <td><span class="chip err">Rejected</span></td>
+                <td>
+                  <ul class="jobs">
+                    <li>
+                      <a href="#">e2e-aws-ovn-upgrade</a>
+                      <div class="job-note">Matches 5.1 nightly. Same test, not a new failure.</div>
+                    </li>
+                  </ul>
+                </td>
+                <td></td>
+                <td><button class="btn" type="button">Edit</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="stream" id="stream-5.0-nightly">
+          <div class="stream-head">
+            <strong>5.0.0-0.nightly</strong>
+            <span class="chip warn">SLO missed · last accepted 32h ago</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Payload</th>
+                <th>Phase</th>
+                <th>Failed blocking jobs</th>
+                <th>Linked</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="payload-cell">
+                  <span class="tag">5.0.0-0.nightly-2026-09-24-120000</span>
+                  <div class="sublinks">
+                    <a href="#">Release controller</a>
+                    <a href="#">Payload agent</a>
+                  </div>
+                </td>
+                <td><span class="chip err">Rejected</span></td>
+                <td>
+                  <ul class="jobs">
+                    <li>
+                      <a href="#">e2e-aws-ovn-upgrade</a> <span class="chip warn">Recurring 2x</span>
+                      <div class="job-note">Backport candidate. Waiting on 5.1 fix.</div>
+                    </li>
+                  </ul>
+                </td>
+                <td>
+                  <div class="links"><a href="#">TRT-4120</a></div>
+                </td>
+                <td><button class="btn" type="button">Edit</button></td>
+              </tr>
+              <tr>
+                <td class="payload-cell">
+                  <span class="tag">5.0.0-0.nightly-2026-09-23-220000</span>
+                  <div class="sublinks"><a href="#">Release controller</a></div>
+                </td>
+                <td><span class="chip ok">Accepted</span></td>
+                <td>-</td>
+                <td></td>
+                <td><button class="btn" type="button">Edit</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="stream" id="stream-5.0-ci">
+          <div class="stream-head">
+            <strong>5.0.0-0.ci</strong>
+            <span class="chip ok">SLO met · last accepted 8h ago</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Payload</th>
+                <th>Phase</th>
+                <th>Failed blocking jobs</th>
+                <th>Linked</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="payload-cell">
+                  <span class="tag">5.0.0-0.ci-2026-09-25-050000</span>
+                  <div class="sublinks"><a href="#">Release controller</a></div>
+                </td>
+                <td><span class="chip ok">Accepted</span></td>
+                <td>-</td>
+                <td></td>
+                <td><button class="btn" type="button">Edit</button></td>
+              </tr>
+              <tr>
+                <td class="payload-cell">
+                  <span class="tag">5.0.0-0.ci-2026-09-24-170000</span>
+                  <div class="sublinks">
+                    <a href="#">Release controller</a>
+                    <a href="#">Payload agent</a>
+                  </div>
+                </td>
+                <td><span class="chip err">Rejected</span></td>
+                <td>
+                  <ul class="jobs">
+                    <li>
+                      <a href="#">e2e-gcp-ovn-upgrade</a>
+                      <div class="job-note">GCP quota. Linked Build Farm outage.</div>
+                    </li>
+                  </ul>
+                </td>
+                <td></td>
+                <td><button class="btn" type="button">Edit</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <h2 style="font-size: 1.25rem; font-weight: 600; margin: 8px 0 8px">Sub components</h2>
+      <p class="mock-caption">TRT Incidents is not a card. Sippy and Sippy-Auth stay in this grid.</p>
+      <div class="grid">
+        <article class="card">
+          <div class="card-top">
+            <h3>Sippy</h3>
+            <span class="chip ok">Healthy</span>
+          </div>
+          <p>The non-auth variant of Sippy</p>
+          <div class="card-foot">Monitored · ci-analytics</div>
+        </article>
+        <article class="card">
+          <div class="card-top">
+            <h3>Sippy-Auth</h3>
+            <span class="chip ok">Healthy</span>
+          </div>
+          <p>The auth variant of Sippy</p>
+          <div class="card-foot">Monitored · ci-analytics</div>
+        </article>
+      </div>
+    </main>
+  </body>
+</html>

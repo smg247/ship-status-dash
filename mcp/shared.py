@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
@@ -416,6 +416,26 @@ class ShipStatusAPI:
             return data
         return _truncate_json({"sub_components": data})
 
+    def get_team_slo(self, team: str) -> dict[str, Any]:
+        data = self.client.public_get(f"/teams/{quote(team, safe='')}/slo")
+        if data is None:
+            return {"error": f"Failed to retrieve SLO for team {team}."}
+        if isinstance(data, dict) and "error" in data:
+            return data
+        if isinstance(data, dict):
+            return data
+        return {"error": "Unexpected JSON shape from team SLO (expected an object)."}
+
+    def get_team_slo_summary(self) -> dict[str, Any]:
+        data = self.client.public_get("/teams/slo-summary")
+        if data is None:
+            return {"error": "Failed to retrieve SLO summary."}
+        if isinstance(data, dict) and "error" in data:
+            return data
+        if isinstance(data, dict):
+            return data
+        return {"error": "Unexpected JSON shape from SLO summary (expected an object)."}
+
     # Write operations (protected API)
 
     def _protected_error(self, data: dict | list | None, fallback: str) -> dict[str, Any] | None:
@@ -650,3 +670,48 @@ class ShipStatusAPI:
     ) -> dict[str, Any]:
         path = f"/components/{component_slug}/{sub_component_slug}/outages/{outage_id}/relationships/{relationship_id}"
         return self._delete_request(path, f"Relationship {relationship_id} deleted.", acting_for=acting_for)
+
+    def upsert_slo_item(
+        self,
+        team: str,
+        kind: str,
+        schema_version: int,
+        item_key: str,
+        group_key: str,
+        occurred_at: str,
+        outcome: str,
+        details: dict,
+        notes: str = "",
+        acting_for: str = "",
+    ) -> dict[str, Any]:
+        body = {
+            "kind": kind,
+            "schema_version": schema_version,
+            "item_key": item_key,
+            "group_key": group_key,
+            "occurred_at": occurred_at,
+            "outcome": outcome,
+            "details": details,
+            "notes": notes,
+        }
+        path = f"/teams/{quote(team, safe='')}/slo/items"
+        return self._dict_request("PUT", path, body, "Failed to upsert SLO item.", acting_for=acting_for)
+
+    def add_slo_item_link(
+        self,
+        team: str,
+        kind: str,
+        item_key: str,
+        url: str,
+        link_type: str = "other",
+        outage_id: int | None = None,
+        acting_for: str = "",
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"url": url, "link_type": link_type}
+        if outage_id is not None:
+            body["outage_id"] = outage_id
+        path = (
+            f"/teams/{quote(team, safe='')}/slo/items/"
+            f"{quote(kind, safe='')}/{quote(item_key, safe='')}/links"
+        )
+        return self._dict_request("PUT", path, body, "Failed to add SLO item link.", acting_for=acting_for)

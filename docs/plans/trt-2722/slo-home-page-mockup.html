@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mock: Home SLO well</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --team: #ba68c8;
+        --paper: #fff;
+        --bg: #fafafa;
+        --text: rgba(0, 0, 0, 0.87);
+        --muted: rgba(0, 0, 0, 0.6);
+        --divider: rgba(0, 0, 0, 0.12);
+        --healthy: #2e7d32;
+        --degraded: #ed6c02;
+        --down: #d32f2f;
+        --radius: 16px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      header.appbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: var(--paper);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 24px;
+        height: 64px;
+      }
+      header.appbar .logo {
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      header.appbar .icons {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .mock-banner {
+        background: #fff8e1;
+        border-bottom: 1px solid #ffe082;
+        color: #6d4c41;
+        font-size: 13px;
+        padding: 8px 24px;
+        text-align: center;
+      }
+      main {
+        max-width: 1200px;
+        margin: 32px auto 64px;
+        padding: 0 24px;
+      }
+      .hero {
+        text-align: center;
+        border-bottom: 2px solid var(--divider);
+        padding-bottom: 16px;
+        margin-bottom: 32px;
+      }
+      .hero .ship {
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+      .hero p {
+        color: var(--muted);
+        margin: 8px 0 0;
+      }
+      .mock-caption {
+        margin: 4px 0 16px;
+        padding: 6px 10px;
+        background: #fff8e1;
+        border-left: 3px solid #ffe082;
+        color: #6d4c41;
+        font-size: 12px;
+        font-style: italic;
+        line-height: 1.4;
+      }
+      .mock-caption::before {
+        content: "Mock caption: ";
+        font-style: normal;
+        font-weight: 600;
+      }
+      .block {
+        margin-bottom: 40px;
+        padding-bottom: 40px;
+        border-bottom: 2px solid var(--divider);
+      }
+      .block h2 {
+        margin: 0 0 4px;
+        font-size: 1.5rem;
+        font-weight: 600;
+      }
+      .well {
+        background: var(--paper);
+        border-radius: var(--radius);
+        padding: 24px;
+        border: 1px solid var(--divider);
+      }
+      .outage-well {
+        border: 2px solid #d32f2f66;
+        background: #d32f2f08;
+      }
+      .outage-well h2 {
+        color: var(--text);
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 16px;
+        padding: 4px 12px;
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .chip.ok {
+        background: var(--healthy);
+        color: #fff;
+      }
+      .chip.warn {
+        background: var(--degraded);
+        color: #fff;
+      }
+      .chip.muted {
+        background: #eee;
+        color: var(--text);
+      }
+      .team-chip {
+        background: #ba68c815;
+        border: 1px solid #ba68c840;
+        border-radius: 16px;
+        padding: 4px 12px;
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .team-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 0.875rem;
+        margin: 4px 0 0;
+      }
+      .incident {
+        border: 1px solid var(--divider);
+        border-left: 4px solid var(--degraded);
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-top: 12px;
+        background: var(--paper);
+      }
+      .incident h3 {
+        margin: 6px 0 4px;
+        font-size: 1rem;
+      }
+      .incident p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.875rem;
+      }
+      .links {
+        margin-top: 8px;
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        font-size: 0.8125rem;
+      }
+      .links a {
+        color: #1976d2;
+        text-decoration: none;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 16px;
+        margin-top: 16px;
+      }
+      .card {
+        background: var(--paper);
+        border-radius: 12px;
+        min-height: 140px;
+        padding: 16px;
+        border: 1px solid var(--divider);
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--healthy);
+        opacity: 0.05;
+        pointer-events: none;
+      }
+      .card > * {
+        position: relative;
+      }
+      .card-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .card h3 {
+        margin: 0;
+        font-size: 1rem;
+      }
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.875rem;
+        flex: 1;
+      }
+      .well-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 16px;
+        margin-bottom: 8px;
+        border-bottom: 1px solid var(--divider);
+      }
+      .well-head h2 {
+        margin: 0;
+        font-size: 1.5rem;
+      }
+      .well-desc {
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
+      .well-foot {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--divider);
+      }
+      .btn {
+        border: 1px solid var(--divider);
+        background: var(--paper);
+        border-radius: 4px;
+        padding: 6px 16px;
+        font: inherit;
+        font-size: 13px;
+      }
+      .view-slo {
+        font-size: 13px;
+        color: #1976d2;
+        text-decoration: none;
+      }
+      .inner-well {
+        margin-top: 16px;
+        background: var(--paper);
+        border: 1px solid var(--divider);
+        border-radius: 12px;
+        padding: 16px;
+      }
+      .inner-well-head {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-bottom: 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--divider);
+      }
+      .inner-well-head .component {
+        font-size: 1rem;
+        font-weight: 600;
+      }
+      .inner-well-head .sub {
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      .inner-well .incident:first-of-type {
+        margin-top: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="appbar">
+      <div class="logo">SHIP Status</div>
+      <div class="icons">theme · help · GitHub · sign in</div>
+    </header>
+    <div class="mock-banner">
+      Static mockup of the home page SLO well for TRT-2722. Italic yellow
+      <strong>Mock caption</strong> lines are annotations, not UI copy. Based on
+      <a href="https://ship-status.ci.openshift.org/">ship-status.ci.openshift.org</a>
+      as of 2026-09-25.
+    </div>
+    <main>
+      <div class="hero">
+        <div class="ship">SHIP</div>
+        <p>Real-time monitoring of system components and availability</p>
+      </div>
+
+      <section class="block">
+        <h2>In Outage</h2>
+        <p class="mock-caption">
+          Always the first well under the logo. SLO never stacks above this.
+          Incident outages stay out of this well.
+        </p>
+        <div class="well outage-well">
+          <p class="well-desc">Sub-components that are currently degraded or down.</p>
+          <div class="grid">
+            <article class="card" style="border-color: #d32f2f40">
+              <div class="card-top">
+                <h3>Build02</h3>
+                <span class="chip warn">Degraded</span>
+              </div>
+              <p>Build Farm</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Team SLOs</h2>
+        <p class="mock-caption">
+          Directly below In Outage, above component wells. Incident outages sit in
+          a nested well labeled with the component and sub-component names.
+          No payload tables on home.
+        </p>
+        <div class="well slo-well">
+          <div class="team-head">
+            <div>
+              <span class="team-chip">TRT</span>
+              <p class="hint">1 accepted payload / 24h · 3 of 4 · worst miss: 5.0 nightly 32h ago</p>
+            </div>
+            <div class="row">
+              <span class="chip warn">SLO missed</span>
+              <a class="view-slo" href="#">View SLO</a>
+            </div>
+          </div>
+          <div class="row">
+            <span class="chip ok">5.1 nightly · 6h</span>
+            <span class="chip ok">5.1 ci · 4h</span>
+            <span class="chip warn">5.0 nightly · 32h</span>
+            <span class="chip ok">5.0 ci · 8h</span>
+          </div>
+          <div class="inner-well">
+            <div class="inner-well-head">
+              <span class="component">TRT Incidents</span>
+              <span class="sub">Incidents</span>
+            </div>
+            <div class="incident">
+              <div class="row">
+                <span class="chip warn">Degraded</span>
+                <span class="chip muted">jira</span>
+              </div>
+              <h3>aws-ovn-upgrade blocking 5.1 nightlies</h3>
+              <p>Opened 14h ago</p>
+              <div class="links">
+                <a href="#">TRT-4120</a>
+                <a href="#">Outage details</a>
+                <a href="#">Team SLO</a>
+              </div>
+            </div>
+            <div class="incident">
+              <div class="row">
+                <span class="chip warn">Degraded</span>
+                <span class="chip muted">jira</span>
+              </div>
+              <h3>upgrade disruption on metal serial</h3>
+              <p>Opened 2d ago</p>
+              <div class="links">
+                <a href="#">TRT-4108</a>
+                <a href="#">Outage details</a>
+                <a href="#">Team SLO</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="well">
+        <div class="well-head">
+          <div>
+            <h2>Sippy</h2>
+            <span class="team-chip">TRT</span>
+          </div>
+          <span class="chip ok">Healthy</span>
+        </div>
+        <p class="well-desc">The non-auth and auth variants of Sippy</p>
+        <p class="mock-caption">TRT Incidents well is gone. Sippy stays. Prow, Boskos, Downstream CI, and Build Farm wells continue below, unchanged.</p>
+        <div class="grid">
+          <article class="card">
+            <div class="card-top">
+              <h3>Sippy</h3>
+              <span class="chip ok">Healthy</span>
+            </div>
+            <p>The non-auth variant of Sippy</p>
+          </article>
+          <article class="card">
+            <div class="card-top">
+              <h3>Sippy-Auth</h3>
+              <span class="chip ok">Healthy</span>
+            </div>
+            <p>The auth variant of Sippy</p>
+          </article>
+        </div>
+        <div class="well-foot"><button class="btn" type="button">Details</button></div>
+      </div>
+    </main>
+  </body>
+</html>

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,7 +38,8 @@ func newTestHandlersWithGroups(t *testing.T, cfg *types.DashboardConfig, om outa
 	triageNoteRepo := &repositories.MockTriageNoteRepository{}
 	outageLinkRepo := &repositories.MockOutageLinkRepository{}
 	cache := &auth.MockGroupMembershipProvider{Groups: groups}
-	return NewHandlers(logrus.New(), cfgManager, om, pingRepo, triageNoteRepo, outageLinkRepo, cache)
+	sloRepo := &repositories.MockSLOWorkspaceRepository{}
+	return NewHandlers(logrus.New(), cfgManager, om, pingRepo, triageNoteRepo, outageLinkRepo, sloRepo, cache)
 }
 
 // minimalDashboardConfig is a tiny valid config (one component, one sub-component) for handler tests.
@@ -333,4 +335,94 @@ func TestParseStatusFilters(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestListAPIsOmitSLOComponent(t *testing.T) {
+	cfg := &types.DashboardConfig{
+		Components: []*types.Component{
+			{
+				Name: "Sippy", Slug: "sippy", ShipTeam: "TRT",
+				Subcomponents: []types.SubComponent{{Name: "Sippy", Slug: "sippy"}},
+			},
+			{
+				Name: "TRT Incidents", Slug: "trt-incidents", ShipTeam: "TRT", SLOComponent: true,
+				Subcomponents: []types.SubComponent{{Name: "Incidents", Slug: "incidents"}},
+			},
+		},
+	}
+	h := newTestHandlers(t, cfg, &outage.MockOutageManager{})
+
+	rr := httptest.NewRecorder()
+	h.GetComponentsJSON(rr, httptest.NewRequest(http.MethodGet, "/api/components", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var components []types.Component
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &components))
+	require.Len(t, components, 1)
+	assert.Equal(t, "Sippy", components[0].Name)
+
+	rr = httptest.NewRecorder()
+	h.ListSubComponentsJSON(rr, httptest.NewRequest(http.MethodGet, "/api/sub-components?team=TRT", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var subs []types.SubComponentListItem
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &subs))
+	require.Len(t, subs, 1)
+	assert.Equal(t, "Sippy", subs[0].ComponentName)
+}
+
+func TestGetTeamSLOUsesListedSLOComponent(t *testing.T) {
+	cfg := &types.DashboardConfig{
+		Components: []*types.Component{
+			{
+				Name: "TRT Incidents", Slug: "trt-incidents", ShipTeam: "Other", SLOComponent: true,
+				Subcomponents: []types.SubComponent{{Name: "Incidents", Slug: "incidents"}},
+			},
+			{
+				Name: "Also Flagged", Slug: "also-flagged", ShipTeam: "TRT", SLOComponent: true,
+				Subcomponents: []types.SubComponent{{Name: "Other", Slug: "other"}},
+			},
+		},
+		TeamSLOs: []types.TeamSLOConfig{{
+			Team:          "TRT",
+			Owners:        []types.Owner{{User: "developer"}},
+			SLOComponents: []string{"trt-incidents"},
+		}},
+	}
+	var queried []string
+	om := &outage.MockOutageManager{
+		GetActiveOutagesForComponentFn: func(slug string) ([]types.Outage, error) {
+			queried = append(queried, slug)
+			if slug != "trt-incidents" {
+				return nil, nil
+			}
+			return []types.Outage{{
+				ComponentName:    "trt-incidents",
+				SubComponentName: "incidents",
+				Description:      "open incident",
+			}}, nil
+		},
+	}
+	h := newTestHandlers(t, cfg, om)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/teams/TRT/slo", nil)
+	req = mux.SetURLVars(req, map[string]string{"team": "TRT"})
+	rr := httptest.NewRecorder()
+	h.GetTeamSLOJSON(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var view struct {
+		SLOComponents []struct {
+			Component    string `json:"component"`
+			SubComponent string `json:"sub_component"`
+			Outages      []struct {
+				Description string `json:"description"`
+			} `json:"outages"`
+		} `json:"slo_components"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &view))
+	require.Len(t, view.SLOComponents, 1)
+	assert.Equal(t, "TRT Incidents", view.SLOComponents[0].Component)
+	assert.Equal(t, "Incidents", view.SLOComponents[0].SubComponent)
+	require.Len(t, view.SLOComponents[0].Outages, 1)
+	assert.Equal(t, "open incident", view.SLOComponents[0].Outages[0].Description)
+	assert.Equal(t, []string{"trt-incidents"}, queried)
 }

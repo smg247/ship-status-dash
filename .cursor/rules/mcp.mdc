@@ -21,6 +21,8 @@ The two servers are entirely separate entry points:
 
 The deployment overrides `CMD` to run `auth_server.py` for the authenticated container.
 
+SLO reads (`get_team_slo`, `get_team_slo_summary`) belong on `public_server.py`. SLO writes (`upsert_slo_item`, `add_slo_item_link`) belong on `auth_server.py`.
+
 See `security.instructions.md` for the full auth model and credential placement rules.
 
 Do not add dev workflow tools here -- use **`ship-status-dev`** (`ship-status-dev/`).

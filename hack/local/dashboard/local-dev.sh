@@ -97,6 +97,12 @@ if ! go run ./cmd/migrate --dsn "$DSN"; then
   exit 1
 fi
 
+echo "Seeding TRT SLO payloads..."
+if ! go run ./cmd/seed-slo --dsn "$DSN" --config hack/local/dashboard/config.yaml; then
+  echo "Error: TRT SLO seed failed"
+  exit 1
+fi
+
 echo "Generating HMAC secret..."
 HMAC_SECRET=$(openssl rand -hex 32)
 HMAC_SECRET_FILE=$(mktemp)
@@ -107,7 +113,7 @@ echo "Starting dashboard server..."
 DASHBOARD_LOG="$LOG_DIR/dashboard-local-dev.log"
 echo "Dashboard server logs: $DASHBOARD_LOG"
 
-go run ./cmd/dashboard --config hack/local/dashboard/config.yaml --port $DASHBOARD_PORT --dsn "$DSN" --hmac-secret-file "$HMAC_SECRET_FILE" --cors-origin "http://localhost:3030" --absent-report-check-interval 15s --slack-base-url "http://localhost:3030" > "$DASHBOARD_LOG" 2>&1 &
+go run ./cmd/dashboard --config hack/local/dashboard/config.yaml --port $DASHBOARD_PORT --dsn "$DSN" --hmac-secret-file "$HMAC_SECRET_FILE" --cors-origin "http://localhost:3030" --absent-report-check-interval 15s --trt-payload-prune-interval 15s --slack-base-url "http://localhost:3030" > "$DASHBOARD_LOG" 2>&1 &
 DASHBOARD_PID=$!
 
 echo "Waiting for dashboard server to be ready..."

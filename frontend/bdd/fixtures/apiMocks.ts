@@ -15,7 +15,8 @@ import {
 } from './mockData'
 
 export const PUBLIC = 'http://localhost:8180'
-export const PROTECTED = 'http://localhost:8443'
+// Dev login and protected calls stay on the Vite origin; the dev server proxies them.
+export const PROTECTED = 'http://localhost:3030'
 
 interface MockApiOptions {
   authenticated?: boolean
@@ -214,6 +215,11 @@ export async function setupApiMocks(page: Page, options: MockApiOptions = {}) {
   })
 
   // --- Tags ---
+  await page.route(`${PUBLIC}/api/teams/slo-summary`, (route) => json(route, { teams: [] }))
+  await page.route(`${PUBLIC}/api/teams/*/slo`, (route) =>
+    json(route, { team: '', evaluations: [], slo_components: [], items: [], item_keys: [] }),
+  )
+
   await page.route(`${PUBLIC}/api/tags`, (route) => {
     return json(route, mockTags)
   })

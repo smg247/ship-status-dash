@@ -588,6 +588,7 @@ def run_tests(
     """Run lint and unit tests (``make lint`` then ``make test``).
 
     Does NOT run e2e tests. Use ``make local-e2e`` separately for e2e.
+    Does NOT run ``make verify-apm``. That check compares generated APM files to HEAD.
     """
     lint_result = _run_foreground(
         "lint",

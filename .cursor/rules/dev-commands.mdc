@@ -9,6 +9,14 @@ Run migrations: `go run ./cmd/migrate --dsn "$SHIP_STATUS_DSN"`
 
 If `SHIP_STATUS_DSN` is not set, use the dev default: `postgres://postgres:password@localhost:5433/ship_status?sslmode=disable`
 
+### SLO seed
+
+After migrate, local dev loads sample payload workspace rows:
+
+`go run ./cmd/seed-slo --dsn "$SHIP_STATUS_DSN" --config hack/local/dashboard/config.yaml`
+
+`--dsn` is required. `--config` defaults to `hack/local/dashboard/config.yaml`. `hack/local/dashboard/local-dev.sh` runs this after migrate. E2e passes `test/e2e/scripts/dashboard-config.yaml`.
+
 ### Linting
 
 Run lint: `make lint`
@@ -35,4 +43,4 @@ Run lint/format: `cd frontend && npx eslint . --fix && npx prettier --write .`
 
 Regenerate agent context (rules, commands, `AGENTS.md`): `make apm`
 
-Requires **uv** / **uvx** (preinstalled in the devcontainer). Check outputs are current: `make verify-apm`
+Requires **uv** / **uvx** (preinstalled in the devcontainer). `make verify-apm` regenerates and fails if those outputs differ from HEAD. That is the CI check. `make lint` does not run it.

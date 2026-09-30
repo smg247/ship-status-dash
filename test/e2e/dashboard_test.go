@@ -93,7 +93,7 @@ func testComponents(client *TestHTTPClient) func(*testing.T) {
 	return func(t *testing.T) {
 		components := getComponents(t, client)
 
-		assert.Len(t, components, 7)
+		assert.Len(t, components, 6)
 		assert.Equal(t, "Prow", components[0].Name)
 		assert.Equal(t, "Backbone of the CI system", components[0].Description)
 		assert.Equal(t, "TestPlatform", components[0].ShipTeam)
@@ -150,12 +150,6 @@ func testComponents(client *TestHTTPClient) func(*testing.T) {
 		assert.Equal(t, "ERT", components[5].ShipTeam)
 		assert.Len(t, components[5].Subcomponents, 1)
 		assert.Equal(t, "systemd-test", components[5].Subcomponents[0].Name)
-
-		assert.Equal(t, "TRT Incidents", components[6].Name)
-		assert.Equal(t, "TRT Jira incidents labeled trt-incident", components[6].Description)
-		assert.Equal(t, "TRT", components[6].ShipTeam)
-		assert.Len(t, components[6].Subcomponents, 1)
-		assert.Equal(t, "Incidents", components[6].Subcomponents[0].Name)
 	}
 }
 
@@ -1373,8 +1367,9 @@ func testListSubComponents(client *TestHTTPClient) func(*testing.T) {
 	return func(t *testing.T) {
 		t.Run("no filters returns all sub-components", func(t *testing.T) {
 			subs := getSubComponents(t, client, "", "", "")
-			// Prow 4 + Downstream CI 1 + Build Farm 2 + Boskos 2 + Sippy 5 + Errata Reliability 1 + TRT Incidents 1
-			assert.Len(t, subs, 16)
+			// Prow 4 + Downstream CI 1 + Build Farm 2 + Boskos 2 + Sippy 5 + Errata Reliability 1.
+			// TRT Incidents is slo_component and omitted from this list.
+			assert.Len(t, subs, 15)
 			for _, sub := range subs {
 				assert.NotEmpty(t, sub.Status)
 			}
@@ -2718,7 +2713,7 @@ func testServiceAccountOutages(client *TestHTTPClient) func(*testing.T) {
 
 			resp, err := client.PostWithBearerToken(
 				fmt.Sprintf("/api/components/%s/%s/outages", utils.Slugify("Build Farm"), utils.Slugify("Build01")),
-				payloadBytes, chaiBotSAToken,
+				payloadBytes, chaiBotSAToken, "chai-bot",
 			)
 			require.NoError(t, err)
 			defer resp.Body.Close()

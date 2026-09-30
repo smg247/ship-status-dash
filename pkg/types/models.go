@@ -394,6 +394,32 @@ func InverseRelationshipType(rt RelationshipType) RelationshipType {
 	}
 }
 
+// SLOWorkspaceItem is one persisted SLO workspace row. details is jsonb whose shape
+// is defined by kind and schema_version.
+type SLOWorkspaceItem struct {
+	gorm.Model
+	Team          string             `json:"team" gorm:"column:team;not null;uniqueIndex:idx_slo_item_identity"`
+	Kind          string             `json:"kind" gorm:"column:kind;not null;uniqueIndex:idx_slo_item_identity"`
+	SchemaVersion int                `json:"schema_version" gorm:"column:schema_version;not null"`
+	ItemKey       string             `json:"item_key" gorm:"column:item_key;not null;uniqueIndex:idx_slo_item_identity"`
+	GroupKey      string             `json:"group_key" gorm:"column:group_key;index"`
+	OccurredAt    time.Time          `json:"occurred_at" gorm:"column:occurred_at;not null;index"`
+	Outcome       string             `json:"outcome" gorm:"column:outcome;not null"`
+	Details       []byte             `json:"details" gorm:"column:details;type:jsonb"`
+	Notes         string             `json:"notes" gorm:"column:notes;type:text"`
+	UpdatedBy     string             `json:"updated_by" gorm:"column:updated_by"`
+	Links         []SLOWorkspaceLink `json:"links,omitempty" gorm:"foreignKey:ItemID"`
+}
+
+// SLOWorkspaceLink is a Jira, outage, or other URL attached to a workspace item.
+type SLOWorkspaceLink struct {
+	gorm.Model
+	ItemID   uint   `json:"item_id" gorm:"column:item_id;not null;index"`
+	URL      string `json:"url" gorm:"column:url;not null"`
+	LinkType string `json:"link_type" gorm:"column:link_type;not null"`
+	OutageID *uint  `json:"outage_id,omitempty" gorm:"column:outage_id"`
+}
+
 // OutageRelationship represents a first-class relationship between two outages.
 // Reciprocal rows are always stored: if A causes B, a row for B caused_by A also exists.
 type OutageRelationship struct {

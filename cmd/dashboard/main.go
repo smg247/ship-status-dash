@@ -25,6 +25,7 @@ import (
 	"ship-status-dash/pkg/config"
 	"ship-status-dash/pkg/outage"
 	"ship-status-dash/pkg/repositories"
+	"ship-status-dash/pkg/slo"
 	"ship-status-dash/pkg/types"
 	"ship-status-dash/pkg/utils"
 )
@@ -38,6 +39,7 @@ type Options struct {
 	CORSOrigin                string
 	KubeconfigPath            string
 	AbsentReportCheckInterval time.Duration
+	TRTPayloadPruneInterval   time.Duration
 	ConfigUpdatePollInterval  time.Duration
 	SlackBaseURL              string
 	SlackWorkspaceURL         string
@@ -54,6 +56,7 @@ func NewOptions() *Options {
 	flag.StringVar(&opts.CORSOrigin, "cors-origin", "*", "CORS allowed origin")
 	flag.StringVar(&opts.KubeconfigPath, "kubeconfig", "", "Path to kubeconfig file (empty string uses in-cluster config)")
 	flag.DurationVar(&opts.AbsentReportCheckInterval, "absent-report-check-interval", 5*time.Minute, "Interval for checking absent monitored component reports")
+	flag.DurationVar(&opts.TRTPayloadPruneInterval, "trt-payload-prune-interval", 5*time.Minute, "Interval for deleting TRT payload items outside retention")
 	flag.DurationVar(&opts.ConfigUpdatePollInterval, "config-update-poll-interval", config.DefaultPollInterval, "Interval for polling config file for changes")
 	flag.StringVar(&opts.SlackBaseURL, "slack-base-url", "", "Base URL for building outage links in Slack messages. Required if slack reporting is enabled.")
 	flag.StringVar(&opts.SlackWorkspaceURL, "slack-workspace-url", "https://rhsandbox.slack.com/", "Slack workspace URL for constructing thread links. Required if slack reporting is enabled.")
@@ -128,6 +131,17 @@ func loadAndValidateConfig(log *logrus.Logger, configPath string) (*types.Dashbo
 		}
 	}
 
+	if err := cfg.ValidateTeamSLOs(); err != nil {
+		return nil, err
+	}
+	for i := range cfg.TeamSLOs {
+		ws := cfg.TeamSLOs[i].Workspace()
+		if ws != nil && !slo.KnownWorkspace(ws.Kind, ws.SchemaVersion) {
+			return nil, fmt.Errorf("team_slos %q: unknown workspace schema %s v%d", cfg.TeamSLOs[i].Team, ws.Kind, ws.SchemaVersion)
+		}
+	}
+	cfg.NormalizeTeamSLOs()
+
 	for _, component := range cfg.Components {
 		component.Slug = utils.Slugify(component.Name)
 		for i := range component.Subcomponents {
@@ -192,6 +206,13 @@ func extractRoverGroups(config *types.DashboardConfig) []string {
 	groupSet := sets.NewString()
 	for _, component := range config.Components {
 		for _, owner := range component.Owners {
+			if owner.RoverGroup != "" {
+				groupSet.Insert(owner.RoverGroup)
+			}
+		}
+	}
+	for _, team := range config.TeamSLOs {
+		for _, owner := range team.Owners {
 			if owner.RoverGroup != "" {
 				groupSet.Insert(owner.RoverGroup)
 			}
@@ -286,10 +307,14 @@ func main() {
 	pingRepo := repositories.NewGORMComponentPingRepository(db)
 	triageNoteRepo := repositories.NewGORMTriageNoteRepository(db)
 	outageLinkRepo := repositories.NewGORMOutageLinkRepository(db)
-	server := NewServer(configManager, log, opts.CORSOrigin, hmacSecret, groupCache, outageManager, pingRepo, triageNoteRepo, outageLinkRepo)
+	sloRepo := repositories.NewGORMSLOWorkspaceRepository(db)
+	server := NewServer(configManager, log, opts.CORSOrigin, hmacSecret, groupCache, outageManager, pingRepo, triageNoteRepo, outageLinkRepo, sloRepo)
 
 	absentReportChecker := NewAbsentMonitoredComponentReportChecker(configManager, outageManager, pingRepo, opts.AbsentReportCheckInterval, log)
 	go absentReportChecker.Start(ctx)
+
+	trtPayloadPruner := NewTRTPayloadPruner(configManager, sloRepo, opts.TRTPayloadPruneInterval, log)
+	go trtPayloadPruner.Start(ctx)
 
 	suspectedExpiryChecker := NewSuspectedOutageExpiryChecker(outageManager, 30*time.Minute, log)
 	go suspectedExpiryChecker.Start(ctx)

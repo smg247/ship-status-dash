@@ -1,16 +1,20 @@
 package types
 
+import "ship-status-dash/pkg/utils"
+
 // DashboardConfig contains the dashboardapplication configuration including component definitions.
 type DashboardConfig struct {
-	Components        []*Component `json:"components" yaml:"components"`
-	Tags              []Tag        `json:"tags" yaml:"tags"`
-	TrustedDelegators []string     `json:"trusted_delegators,omitempty" yaml:"trusted_delegators,omitempty"`
+	Components        []*Component    `json:"components" yaml:"components"`
+	Tags              []Tag           `json:"tags" yaml:"tags"`
+	TrustedDelegators []string        `json:"trusted_delegators,omitempty" yaml:"trusted_delegators,omitempty"`
+	TeamSLOs          []TeamSLOConfig `json:"team_slos,omitempty" yaml:"team_slos,omitempty"`
 }
 
 func (c *DashboardConfig) GetComponentBySlug(slug string) *Component {
 	for i := range c.Components {
-		if c.Components[i].Slug == slug {
-			return c.Components[i]
+		component := c.Components[i]
+		if component != nil && component.EffectiveSlug() == slug {
+			return component
 		}
 	}
 	return nil
@@ -66,6 +70,20 @@ type Component struct {
 	SlackReporting []SlackReportingConfig `json:"slack_reporting,omitempty" yaml:"slack_reporting,omitempty"`
 	Subcomponents  []SubComponent         `json:"sub_components" yaml:"sub_components"`
 	Owners         []Owner                `json:"owners" yaml:"owners"`
+	// SLOComponent hides this component from home and team list APIs.
+	// SLO well membership is team_slos[].slo_components, not ship_team.
+	SLOComponent bool `json:"slo_component,omitempty" yaml:"slo_component,omitempty"`
+}
+
+// EffectiveSlug is the configured slug, or the slug of Name when Slug has not been assigned yet.
+func (c *Component) EffectiveSlug() string {
+	if c == nil {
+		return ""
+	}
+	if c.Slug != "" {
+		return c.Slug
+	}
+	return utils.Slugify(c.Name)
 }
 
 func (c *Component) GetSubComponentBySlug(slug string) *SubComponent {
@@ -99,6 +117,17 @@ type SubComponent struct {
 	ReportThreshold int `json:"report_threshold,omitempty" yaml:"report_threshold,omitempty"`
 }
 
+// EffectiveSlug is the configured slug, or the slug of Name when Slug has not been assigned yet.
+func (s *SubComponent) EffectiveSlug() string {
+	if s == nil {
+		return ""
+	}
+	if s.Slug != "" {
+		return s.Slug
+	}
+	return utils.Slugify(s.Name)
+}
+
 const DefaultReportThreshold = 3
 
 // Monitoring defines how this sub-component is automatically monitored.
@@ -124,6 +153,64 @@ type Owner struct {
 	ServiceAccount string `json:"service_account,omitempty" yaml:"service_account,omitempty"`
 	// User is a username of a user who is an admin of the component, this is used for development/testing purposes only
 	User string `json:"user,omitempty" yaml:"user,omitempty"`
+}
+
+// TeamSLOConfig is the team-scoped SLO definition from dashboard YAML.
+type TeamSLOConfig struct {
+	Team   string  `json:"team" yaml:"team"`
+	Owners []Owner `json:"owners" yaml:"owners"`
+	// SLOComponents are component slugs whose active outages appear in this team's SLO wells.
+	// Each slug must match a component with slo_component set.
+	SLOComponents []string   `json:"slo_components,omitempty" yaml:"slo_components,omitempty"`
+	SLOs          []NamedSLO `json:"slos" yaml:"slos"`
+}
+
+// NamedSLO is one objective. At most one SLO per team may set Workspace.
+type NamedSLO struct {
+	Name        string        `json:"name" yaml:"name"`
+	DisplayName string        `json:"display_name" yaml:"display_name"`
+	Source      string        `json:"source" yaml:"source"`
+	Workspace   *SLOWorkspace `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+}
+
+// SLOWorkspace is the versioned document contract shared with producers.
+type SLOWorkspace struct {
+	Kind           string      `json:"kind" yaml:"kind"`
+	SchemaVersion  int         `json:"schema_version" yaml:"schema_version"`
+	RecentPayloads int         `json:"recent_payloads,omitempty" yaml:"recent_payloads,omitempty"`
+	Streams        []SLOStream `json:"streams,omitempty" yaml:"streams,omitempty"`
+}
+
+// SLOStream is one watched release stream.
+type SLOStream struct {
+	Controller string `json:"controller" yaml:"controller"`
+	Name       string `json:"name" yaml:"name"`
+}
+
+// TeamSLOByTeam returns the SLO config for a team, or nil.
+func (c *DashboardConfig) TeamSLOByTeam(team string) *TeamSLOConfig {
+	if c == nil {
+		return nil
+	}
+	for i := range c.TeamSLOs {
+		if c.TeamSLOs[i].Team == team {
+			return &c.TeamSLOs[i]
+		}
+	}
+	return nil
+}
+
+// Workspace returns the single workspace on this team, or nil.
+func (t *TeamSLOConfig) Workspace() *SLOWorkspace {
+	if t == nil {
+		return nil
+	}
+	for i := range t.SLOs {
+		if t.SLOs[i].Workspace != nil {
+			return t.SLOs[i].Workspace
+		}
+	}
+	return nil
 }
 
 // ComponentMonitorConfig contains the configuration for the component monitor.

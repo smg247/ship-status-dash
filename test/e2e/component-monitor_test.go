@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"ship-status-dash/pkg/slo/seed"
 	"ship-status-dash/pkg/types"
 	"ship-status-dash/pkg/utils"
 
@@ -325,6 +326,9 @@ func cleanupActiveOutages(t *testing.T, client *TestHTTPClient, componentName, s
 	outages := getOutages(t, client, componentName, subComponentName)
 	activeOutages := filterActiveOutages(outages)
 	for _, outage := range activeOutages {
+		if outage.CreatedBy == seed.UpdatedBy {
+			continue
+		}
 		resp, err := client.Delete(fmt.Sprintf("/api/components/%s/%s/outages/%d", utils.Slugify(componentName), utils.Slugify(subComponentName), outage.ID))
 		if err == nil && resp.StatusCode == http.StatusNoContent {
 			resp.Body.Close()
@@ -342,6 +346,9 @@ func cleanupOutages(t *testing.T, client *TestHTTPClient, componentName, subComp
 	outages := getOutages(t, client, componentName, subComponentName)
 	deleted := 0
 	for _, outage := range outages {
+		if outage.CreatedBy == seed.UpdatedBy {
+			continue
+		}
 		resp, err := client.Delete(fmt.Sprintf("/api/components/%s/%s/outages/%d",
 			utils.Slugify(componentName), utils.Slugify(subComponentName), outage.ID))
 		require.NoError(t, err, "delete outage %d", outage.ID)

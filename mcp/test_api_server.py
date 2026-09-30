@@ -15,6 +15,8 @@ _READ_TOOLS = {
     "list_components",
     "list_tags",
     "list_sub_components",
+    "get_team_slo",
+    "get_team_slo_summary",
 }
 
 _WRITE_TOOLS = {
@@ -29,6 +31,8 @@ _WRITE_TOOLS = {
     "delete_outage_link",
     "add_outage_relationship",
     "delete_outage_relationship",
+    "upsert_slo_item",
+    "add_slo_item_link",
 }
 
 

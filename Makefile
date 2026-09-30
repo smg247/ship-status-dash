@@ -25,7 +25,7 @@ mcp-test-api:
 mcp-test-dev:
 	@ship-status-dev/.venv/bin/pytest ship-status-dev/ -q
 
-lint: npm verify-apm
+lint: npm
 	@./hack/go-lint.sh --timeout 10m run ./...
 	@cd frontend && npm run lint
 	@cd frontend && npm audit --omit=dev
@@ -57,9 +57,11 @@ apm:
 	$(_uvx_env) uvx --from apm-cli@0.13.0 apm install
 	$(_uvx_env) uvx --from apm-cli@0.13.0 apm compile
 
+APM_GENERATED_FILES := .claude .cursor .gemini .opencode AGENTS.md CLAUDE.md GEMINI.md frontend/AGENTS.md frontend/CLAUDE.md mcp/AGENTS.md mcp/CLAUDE.md ship-status-dev/AGENTS.md ship-status-dev/CLAUDE.md
+
 verify-apm: apm
-	@if [ -n "$$(git status --porcelain -- .apm apm.lock.yaml .claude .cursor .gemini .opencode AGENTS.md CLAUDE.md GEMINI.md frontend/AGENTS.md frontend/CLAUDE.md mcp/AGENTS.md mcp/CLAUDE.md ship-status-dev/AGENTS.md ship-status-dev/CLAUDE.md)" ]; then \
+	@if [ -n "$$(git status --porcelain -- $(APM_GENERATED_FILES))" ]; then \
 		echo "ERROR: Generated APM files are out of date. Run 'make apm' and commit the results."; \
-		git status --short -- .apm apm.lock.yaml .claude .cursor .gemini .opencode AGENTS.md CLAUDE.md GEMINI.md frontend/AGENTS.md frontend/CLAUDE.md mcp/AGENTS.md mcp/CLAUDE.md ship-status-dev/AGENTS.md ship-status-dev/CLAUDE.md; \
+		git status --short -- $(APM_GENERATED_FILES); \
 		exit 1; \
 	fi

@@ -29,11 +29,11 @@ type Server struct {
 }
 
 // NewServer creates a new Server instance
-func NewServer(configManager *config.Manager[types.DashboardConfig], logger *logrus.Logger, corsOrigin string, hmacSecret []byte, groupCache auth.GroupMembershipProvider, outageManager outage.OutageManager, pingRepo repositories.ComponentPingRepository, triageNoteRepo repositories.TriageNoteRepository, outageLinkRepo repositories.OutageLinkRepository) *Server {
+func NewServer(configManager *config.Manager[types.DashboardConfig], logger *logrus.Logger, corsOrigin string, hmacSecret []byte, groupCache auth.GroupMembershipProvider, outageManager outage.OutageManager, pingRepo repositories.ComponentPingRepository, triageNoteRepo repositories.TriageNoteRepository, outageLinkRepo repositories.OutageLinkRepository, sloRepo repositories.SLOWorkspaceRepository) *Server {
 	return &Server{
 		logger:        logger,
 		configManager: configManager,
-		handlers:      NewHandlers(logger, configManager, outageManager, pingRepo, triageNoteRepo, outageLinkRepo, groupCache),
+		handlers:      NewHandlers(logger, configManager, outageManager, pingRepo, triageNoteRepo, outageLinkRepo, sloRepo, groupCache),
 		corsOrigin:    corsOrigin,
 		hmacSecret:    hmacSecret,
 	}
@@ -95,6 +95,42 @@ func (s *Server) setupRoutes() http.Handler {
 			method:    http.MethodGet,
 			handler:   s.handlers.GetOutagesDuringJSON,
 			protected: false,
+		},
+		{
+			path:      "/api/teams/slo-summary",
+			method:    http.MethodGet,
+			handler:   s.handlers.GetTeamSLOSummaryJSON,
+			protected: false,
+		},
+		{
+			path:      "/api/teams/{team}/slo",
+			method:    http.MethodGet,
+			handler:   s.handlers.GetTeamSLOJSON,
+			protected: false,
+		},
+		{
+			path:      "/api/teams/{team}/slo/items",
+			method:    http.MethodPut,
+			handler:   s.handlers.PutSLOItemJSON,
+			protected: true,
+		},
+		{
+			path:      "/api/teams/{team}/slo/items/{kind}/{itemKey}",
+			method:    http.MethodDelete,
+			handler:   s.handlers.DeleteSLOItemJSON,
+			protected: true,
+		},
+		{
+			path:      "/api/teams/{team}/slo/items/{kind}/{itemKey}/links",
+			method:    http.MethodPut,
+			handler:   s.handlers.PutSLOItemLinkJSON,
+			protected: true,
+		},
+		{
+			path:      "/api/teams/{team}/slo/items/{kind}/{itemKey}/links/{linkId:[0-9]+}",
+			method:    http.MethodDelete,
+			handler:   s.handlers.DeleteSLOItemLinkJSON,
+			protected: true,
 		},
 		{
 			path:      "/api/components/{componentName}",

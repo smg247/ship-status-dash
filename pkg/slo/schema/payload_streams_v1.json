@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "payload_streams/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload_url", "jobs"],
+  "properties": {
+    "payload_url": { "type": "string", "minLength": 1 },
+    "analysis_url": { "type": "string" },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "url", "state"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "url": { "type": "string", "minLength": 1 },
+          "state": { "type": "string", "minLength": 1 },
+          "notes": { "type": "string" },
+          "recurring_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

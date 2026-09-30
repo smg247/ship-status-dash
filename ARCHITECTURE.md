@@ -24,6 +24,7 @@ flowchart TB
         AuthMW["HMAC auth middleware<br/>(protected routes only)"]
         ReportProc["ComponentMonitorReportProcessor"]
         AbsentChecker["AbsentReportChecker"]
+        TRTPayloadPruner["TRTPayloadPruner"]
         OutageMgr["DBOutageManager"]
         ConfigMgr["Config manager"]
         GroupCache["Group membership cache"]
@@ -65,6 +66,7 @@ flowchart TB
     AuthMW --> OutageMgr & ReportProc
     API --> SPA
     AbsentChecker --> OutageMgr
+    TRTPayloadPruner --> PG
     OutageMgr --> PG
     ReportProc --> PG
     ConfigMgr --> ReleaseGit
@@ -184,19 +186,22 @@ Production components are usually owned via `owners.rover_group` in [`dashboard-
 
 The optional `owners.user` field is intended for local/testing overrides (see [`Owner` in `pkg/types/config.go`](pkg/types/config.go)); it uses the same exact match against `X-Forwarded-User`.
 
+Team SLO workspace writes use the same owner fields and the same exact match, through [`IsUserAuthorizedForTeamSLO`](cmd/dashboard/slo_handlers.go) on that team's `team_slos[].owners`. Component owners do not grant team SLO write access.
+
 **Where the username is used**
 
 | Use | Location | Behavior |
 |-----|----------|----------|
-| Gate mutating API calls | [`IsUserAuthorizedForComponent`](cmd/dashboard/handlers.go) | Required for POST/PATCH/DELETE on outages; returns 403 if the user is not in any owner `user` or `rover_group` for that component |
-| Session / admin scope | `GET /api/user` | Returns `{ username, components[] }` — component slugs the user may administer ([`GetAuthenticatedUserJSON`](cmd/dashboard/handlers.go)) |
+| Gate mutating API calls | [`IsUserAuthorizedForComponent`](cmd/dashboard/handlers.go) | Required for POST/PATCH/DELETE on outages; returns 403 if the user is not in any owner `user`, `service_account`, or `rover_group` for that component |
+| Gate team SLO writes | [`IsUserAuthorizedForTeamSLO`](cmd/dashboard/slo_handlers.go) | Required for PUT/DELETE on `/api/teams/{team}/slo/items` and links; returns 403 unless the user is on that team's `team_slos` owners |
+| Session / admin scope | `GET /api/user` | Returns `username`, `components` (slugs the user may administer), and `team_slos` (team names whose workspace the user may edit) ([`GetAuthenticatedUserJSON`](cmd/dashboard/handlers.go)) |
 | Outage attribution | `outages.created_by` | Set to the active user on manual create ([`CreateOutageJSON`](cmd/dashboard/handlers.go)); shown in the UI and audit history |
 | Audit trail | `outage_audit_logs.user` | Recorded on create, update, and delete via GORM hooks using `CurrentUserKey` from the repository ([`pkg/types/models.go`](pkg/types/models.go)) |
-| UI affordances | [`AuthContext`](frontend/src/contexts/AuthContext.tsx) | Fetches `/api/user` with cookies; `isComponentAdmin(slug)` enables create/edit/delete controls ([`OutageActions`](frontend/src/components/outage/actions/OutageActions.tsx), [`SubComponentDetails`](frontend/src/components/sub-component/SubComponentDetails.tsx)) |
+| UI affordances | [`AuthContext`](frontend/src/contexts/AuthContext.tsx) | Fetches `/api/user` with cookies; `isComponentAdmin(slug)` enables outage create/edit/delete ([`OutageActions`](frontend/src/components/outage/actions/OutageActions.tsx), [`SubComponentDetails`](frontend/src/components/sub-component/SubComponentDetails.tsx)). `isTeamSLOAdmin(team)` enables SLO workspace add/edit |
 
 **What the username is not used for**
 
-- **Public reads** — status and read-only outage endpoints do not require a user identity.
+- **Public reads.** Status, team SLO, and read-only outage endpoints do not require a user identity.
 - **Confirmation** — confirming an outage sets `confirmed_at` only; there is no separate `confirmed_by` field. The updating user still appears in audit logs when confirmation changes via PATCH.
 - **Component-monitor outages** — automated reports use the service account in `X-Forwarded-User` (e.g. `system:serviceaccount:ship-status:component-monitor`) for `created_by` and a different authorization path (`owners.service_account`), not Rover groups.
 
@@ -208,12 +213,13 @@ Local development mirrors this layout with [`mock-oauth-proxy`](cmd/mock-oauth-p
 
 | Component | Location | Role |
 |-----------|----------|------|
-| Dashboard API | `cmd/dashboard` | REST API, outage management, Slack notifications, absent-report watchdog |
+| Dashboard API | `cmd/dashboard` | REST API, outage management, Slack notifications, absent-report watchdog, TRT payload retention pruner |
 | oauth-proxy | Sidecar in prod; `cmd/mock-oauth-proxy` locally | Authentication gateway and HMAC request signing for protected routes |
 | Frontend | `frontend/` | React SPA (served as static assets by the dashboard in production) |
 | Component monitor | `cmd/component-monitor` | Periodic probes; reports to `https://protected.ship-status.ci.openshift.org` |
-| Database | PostgreSQL | Outages, audit logs, report pings, Slack thread metadata |
+| Database | PostgreSQL | Outages, audit logs, report pings, Slack thread metadata, SLO workspace items and links (`slo_workspace_items`, `slo_workspace_links`) |
 | Migrations | `cmd/migrate` | Schema migrations (init container in prod) |
+| SLO seed | `cmd/seed-slo` | Sample payload workspace for local dev and e2e (`images/seed-slo`) |
 
 ## Main data paths
 

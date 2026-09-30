@@ -11,6 +11,11 @@ export const getPublicDomain = () => {
 }
 
 export const getProtectedDomain = () => {
+  // The dev server proxies /oauth and protected /api to the mock oauth proxy.
+  // Using the page origin keeps login on the port the browser already has open.
+  if (import.meta.env.DEV) {
+    return window.location.origin
+  }
   const envDomain = import.meta.env.VITE_PROTECTED_DOMAIN
   if (!envDomain) {
     throw new Error('VITE_PROTECTED_DOMAIN environment variable is required')
@@ -143,6 +148,24 @@ export const getOutageRelationshipEndpoint = (
   relationshipId: number,
 ) =>
   `${getProtectedDomain()}/api/components/${slugify(componentName)}/${slugify(subComponentName)}/outages/${outageId}/relationships/${relationshipId}`
+
+export const getTeamSLOEndpoint = (team: string) =>
+  `${getPublicDomain()}/api/teams/${encodeURIComponent(team)}/slo`
+
+export const getTeamSLOSummaryEndpoint = () => `${getPublicDomain()}/api/teams/slo-summary`
+
+export const putSLOItemEndpoint = (team: string) =>
+  `${getProtectedDomain()}/api/teams/${encodeURIComponent(team)}/slo/items`
+
+export const putSLOItemLinkEndpoint = (team: string, kind: string, itemKey: string) =>
+  `${getProtectedDomain()}/api/teams/${encodeURIComponent(team)}/slo/items/${encodeURIComponent(kind)}/${encodeURIComponent(itemKey)}/links`
+
+export const deleteSLOItemLinkEndpoint = (
+  team: string,
+  kind: string,
+  itemKey: string,
+  linkId: number,
+) => `${putSLOItemLinkEndpoint(team, kind, itemKey)}/${linkId}`
 
 export const getUserEndpoint = () => `${getProtectedDomain()}/api/user`
 

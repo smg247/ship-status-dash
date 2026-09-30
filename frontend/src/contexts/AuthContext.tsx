@@ -6,12 +6,14 @@ import { getUserEndpoint } from '../utils/endpoints'
 interface AuthenticatedUser {
   username: string
   components: string[]
+  team_slos?: string[]
 }
 
 interface AuthContextType {
   user: AuthenticatedUser | null
   loading: boolean
   isComponentAdmin: (componentSlug: string) => boolean
+  isTeamSLOAdmin: (team: string) => boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -50,8 +52,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return user.components.includes(componentSlug)
   }
 
+  const isTeamSLOAdmin = (team: string): boolean => {
+    if (!user) {
+      return false
+    }
+    return (user.team_slos ?? []).includes(team)
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, isComponentAdmin: isComponentAdmin }}>
+    <AuthContext.Provider value={{ user, loading, isComponentAdmin, isTeamSLOAdmin }}>
       {children}
     </AuthContext.Provider>
   )
